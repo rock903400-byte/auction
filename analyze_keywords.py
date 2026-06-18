@@ -2,7 +2,7 @@ import pandas as pd
 import re
 
 # Load Excel
-excel_file = '49518.xls'
+excel_file = "49518.xls"
 df = pd.read_excel(excel_file)
 
 # Extract towns from "縣市" and "土地坐落/面積"
@@ -10,9 +10,9 @@ df = pd.read_excel(excel_file)
 towns = set()
 for idx, row in df.iterrows():
     # Try to find town in the address string
-    addr = str(row['土地坐落/面積'])
+    addr = str(row["土地坐落/面積"])
     # Towns are usually 3 chars: XX鄉, XX區, XX鎮, XX市
-    match = re.search(r'([^\s\d]+?[鄉區鎮市])', addr)
+    match = re.search(r"([^\s\d]+?[鄉區鎮市])", addr)
     if match:
         towns.add(match.group(1))
 

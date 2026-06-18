@@ -1,12 +1,13 @@
 import pandas as pd
-import re
 
-df = pd.read_excel('49518.xls')
+df = pd.read_excel("49518.xls")
+
 
 def parse_case(row):
-    case_raw = str(row['字號\n股別'])
-    batch = str(row['標別']).strip()
+    case_raw = str(row["字號\n股別"])
+    batch = str(row["標別"]).strip()
     return case_raw, batch
+
 
 unique_batches = set()
 for _, row in df.iterrows():

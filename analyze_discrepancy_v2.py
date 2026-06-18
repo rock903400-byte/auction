@@ -3,23 +3,26 @@ import json
 import re
 
 # Load Excel
-excel_file = '49518.xls'
+excel_file = "49518.xls"
 df = pd.read_excel(excel_file)
 
+
 def parse_excel_row(row):
-    case_raw = str(row['字號\n股別'])
-    case_match = re.search(r'(\d+)[\s\S]*?([^\d\s]+)[\s\S]*?第(\d+)號', case_raw)
+    case_raw = str(row["字號\n股別"])
+    case_match = re.search(r"(\d+)[\s\S]*?([^\d\s]+)[\s\S]*?第(\d+)號", case_raw)
     yy, id_str, no = "", "", ""
     if case_match:
         yy = case_match.group(1)
         id_str = case_match.group(2)
-        no = str(int(case_match.group(3))) # clean leading zeros
-    batch = str(row['標別']).strip() if pd.notnull(row['標別']) else ""
-    if batch == "nan": batch = ""
+        no = str(int(case_match.group(3)))  # clean leading zeros
+    batch = str(row["標別"]).strip() if pd.notnull(row["標別"]) else ""
+    if batch == "nan":
+        batch = ""
     return yy, no, batch
 
+
 # Load JSON
-with open('fetched_data.json', 'r', encoding='utf-8') as f:
+with open("fetched_data.json", "r", encoding="utf-8") as f:
     json_data = json.load(f)
 
 excel_keys = set()
@@ -30,12 +33,12 @@ for idx, row in df.iterrows():
 only_in_gas = []
 gas_logic_keys = set()
 for item in json_data:
-    saleno = str(item.get('saleno'))
-    rrange = str(item.get('rrange', '')).strip()
+    saleno = str(item.get("saleno"))
+    rrange = str(item.get("rrange", "")).strip()
     if rrange in ["全部", "1分之1"]:
-        yy = str(item.get('crmyy'))
-        no = str(int(item.get('crmno')))
-        batch = str(item.get('batchno', '')).strip()
+        yy = str(item.get("crmyy"))
+        no = str(int(item.get("crmno")))
+        batch = str(item.get("batchno", "")).strip()
         key = (yy, no, batch)
         gas_logic_keys.add(key)
         if key not in excel_keys:

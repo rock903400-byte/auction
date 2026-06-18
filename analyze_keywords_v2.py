@@ -2,19 +2,19 @@ import pandas as pd
 import re
 
 # Load Excel
-excel_file = '49518.xls'
+excel_file = "49518.xls"
 df = pd.read_excel(excel_file)
 
 # Extract towns from "縣市" column
 towns = set()
 for idx, row in df.iterrows():
-    val = str(row['縣市'])
-    parts = val.split('\n')
+    val = str(row["縣市"])
+    parts = val.split("\n")
     if len(parts) > 1:
         towns.add(parts[1].strip())
     else:
         # Fallback regex if no newline
-        match = re.search(r'([^\s\d]+?[鄉區鎮市])', val)
+        match = re.search(r"([^\s\d]+?[鄉區鎮市])", val)
         if match:
             towns.add(match.group(1))
 

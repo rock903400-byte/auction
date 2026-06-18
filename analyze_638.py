@@ -1,6 +1,8 @@
 import json
 
-with open('C:\\Users\\user\\Desktop\\法拍\\fetched_data.json', 'r', encoding='utf-8') as f:
+with open(
+    "C:\\Users\\user\\Desktop\\法拍\\fetched_data.json", "r", encoding="utf-8"
+) as f:
     data = json.load(f)
 
 unique_data = data[0:638]
@@ -11,9 +13,15 @@ gas_unique = {}
 for item in unique_data:
     # saletype check (no-op as saletype is missing)
     # shre check (no-op as shre is missing)
-    
-    key = str(item.get('hsimun')) + str(item.get('crmyy')) + str(item.get('crmid')) + str(item.get('crmno')) + str(item.get('saleno', '0'))
-    
+
+    key = (
+        str(item.get("hsimun"))
+        + str(item.get("crmyy"))
+        + str(item.get("crmid"))
+        + str(item.get("crmno"))
+        + str(item.get("saleno", "0"))
+    )
+
     if key not in gas_unique:
         gas_unique[key] = item
     else:

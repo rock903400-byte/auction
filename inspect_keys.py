@@ -1,6 +1,6 @@
 import json
 
-with open('fetched_data.json', 'r', encoding='utf-8') as f:
+with open("fetched_data.json", "r", encoding="utf-8") as f:
     data = json.load(f)
 
 if data:
@@ -12,8 +12,8 @@ if data:
 
     # Look for items where saleno might be related to auction type
     # (though we think it's target no)
-    
+
     # Let's see if there are any fields we missed
     for key in sorted(list(keys)):
-        if 'sale' in key.lower() or 'type' in key.lower() or 'title' in key.lower():
+        if "sale" in key.lower() or "type" in key.lower() or "title" in key.lower():
             print(f"Potential field: {key}")
