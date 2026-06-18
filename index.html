@@ -169,10 +169,14 @@
 
     .skeleton { background: #e2e8f0; border-radius: 8px; animation: pulse 1.5s infinite ease-in-out; }
     @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
-    .sk-card { height: 200px; padding: 1.25rem; border-radius: var(--radius); background: #fff; display: flex; flex-direction: column; gap: 1rem; border: 1px solid var(--border); }
-    .sk-line { height: 1.2rem; width: 100%; }
+    .sk-card { height: 220px; padding: 1.25rem; border-radius: var(--radius); background: #fff; display: flex; flex-direction: column; gap: 0.75rem; border: 1px solid var(--border); }
+    .sk-line { height: 1rem; width: 100%; border-radius: 6px; }
+    .sk-line-lg { height: 2rem; width: 40%; border-radius: 8px; }
+    .sk-line-sm { height: 0.75rem; width: 70%; border-radius: 6px; }
+    .sk-row { display: flex; gap: 0.75rem; }
+    .sk-box { height: 3rem; flex: 1; border-radius: 8px; }
 
-    #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: var(--primary); color: white; padding: 10px 24px; border-radius: 100px; font-size: 0.85rem; opacity: 0; transition: all 0.3s; z-index: 1000; pointer-events: none; }
+    #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: var(--primary); color: white; padding: 12px 28px; border-radius: 100px; font-size: 0.9rem; font-weight: 700; opacity: 0; transition: all 0.3s; z-index: 1000; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
   </style>
 </head>
 <body>
@@ -212,7 +216,10 @@
       <label>排序方式</label>
       <select id="f-sort" onchange="render()">
         <option value="roiDesc">報酬率最高 ↓</option>
+        <option value="roiAsc">報酬率最低 ↑</option>
         <option value="priceAsc">底價最低 ↑</option>
+        <option value="priceDesc">底價最高 ↓</option>
+        <option value="dateAsc">拍賣日期最近 ↑</option>
       </select>
     </div>
     <div class="f-group f-full">
@@ -225,20 +232,23 @@
 <div class="list-info-bar">
   <div class="stat-pill" id="result-count"><i class="fa-solid fa-list-ul"></i> 正在載入...</div>
   <div style="font-size: 0.75rem; color: var(--text-muted);">
-    <i class="fa-solid fa-clock-rotate-left"></i> 即時更新
+    <i class="fa-solid fa-clock-rotate-left"></i> 每5分鐘更新
   </div>
 </div>
 
 <section id="list" class="list"></section>
-<div id="toast">已複製地址</div>
+<div id="toast"><i class="fa-solid fa-check-circle"></i> 已複製地址</div>
 
 <script>
   // ── 請填入您部署的 GAS Web App URL ──────────────────────────────────────────
   var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbypj7KX4Cr3Bq7TqnWlez_yZoMxtZxZSXU3vcNrfhCxeudiUya-zO9SN7B8c7he4BG9/exec';
   // ────────────────────────────────────────────────────────────────────────────
 
+  const PAGE_SIZE = 20;
   var rawData = { general: [], special: [] };
   var currentTab = 'general';
+  var currentPage = 1;
+  var _currentList = [];
   var userRole = 'visitor';
   var isRestricted = true;
   var userEmail = localStorage.getItem('auction_email') || '';
@@ -270,7 +280,7 @@
 
   function renderSkeleton() {
     document.getElementById('list').innerHTML = Array(3).fill(
-      '<div class="sk-card"><div class="skeleton sk-line"></div><div class="skeleton sk-line" style="width:60%"></div></div>'
+      '<div class="sk-card"><div class="skeleton sk-line-lg"></div><div class="skeleton sk-line-sm"></div><div class="skeleton sk-line"></div><div class="sk-row"><div class="skeleton sk-box"></div><div class="skeleton sk-box"></div></div></div>'
     ).join('');
   }
 
@@ -303,17 +313,17 @@
     rawData.general = preprocess(data.general || []);
     rawData.special = preprocess(data.special || []);
 
-    if (data.userEmail) {
-      document.getElementById('user-zone').innerHTML =
-        '<div style="text-align:right">' +
-          '<div style="font-size:0.7rem; font-weight:800; color:var(--accent)">' + userRole.toUpperCase() + ' 會員</div>' +
-          '<div style="font-size:0.6rem; color:rgba(255,255,255,0.7); max-width:160px; overflow:hidden; text-overflow:ellipsis">' + data.userEmail + '</div>' +
-        '</div>' +
-        '<button class="btn-login" onclick="openLoginModal()"><i class="fa-solid fa-pen-to-square"></i></button>';
-    } else {
-      document.getElementById('user-zone').innerHTML =
-        '<button class="btn-login" onclick="openLoginModal()"><i class="fa-solid fa-user"></i> 訪客模式</button>';
-    }
+      if (data.userEmail) {
+        document.getElementById('user-zone').innerHTML =
+          '<div style="text-align:right">' +
+            '<div style="font-size:0.7rem; font-weight:800; color:var(--accent)">' + userRole.toUpperCase() + ' 會員</div>' +
+            '<div style="font-size:0.6rem; color:rgba(255,255,255,0.7); max-width:160px; overflow:hidden; text-overflow:ellipsis">' + data.userEmail + '</div>' +
+          '</div>' +
+          '<button class="btn-login" onclick="openLoginModal()" title="切換帳號"><i class="fa-solid fa-arrow-right-from-bracket"></i> 切換</button>';
+      } else {
+        document.getElementById('user-zone').innerHTML =
+          '<button class="btn-login" onclick="openLoginModal()"><i class="fa-solid fa-user"></i> 登入 / 訪客</button>';
+      }
 
     document.getElementById('t-gen').querySelector('.count-badge').innerText = rawData.general.length;
     document.getElementById('t-buy').querySelector('.count-badge').innerText = rawData.special.length;
@@ -336,24 +346,44 @@
     var fCounty = document.getElementById('f-county').value;
     var fKey = document.getElementById('f-key').value.trim().toLowerCase();
     var fSort = document.getElementById('f-sort').value;
+    currentPage = 1;
 
     var list = (rawData[currentTab] || []).filter(function(item) {
       if (fCounty !== 'ALL' && item.county !== fCounty) return false;
-      if (fKey && !(item.address || '').toLowerCase().includes(fKey)) return false;
+      if (fKey) {
+        var searchText = ((item.address || '') + ' ' + (item.court_name || '') + ' ' + (item.case_no || '') + ' ' + (item.sale_type || '') + ' ' + (item.county || '')).toLowerCase();
+        if (!searchText.includes(fKey)) return false;
+      }
       return true;
     });
 
-    list.sort(function(a, b) { return fSort === 'roiDesc' ? b.roi - a.roi : a.numPrice - b.numPrice; });
+    list.sort(function(a, b) {
+      if (fSort === 'roiDesc') return b.roi - a.roi;
+      if (fSort === 'roiAsc') return a.roi - b.roi;
+      if (fSort === 'priceDesc') return b.numPrice - a.numPrice;
+      if (fSort === 'dateAsc') return (a.sale_date || '').localeCompare(b.sale_date || '');
+      return a.numPrice - b.numPrice;
+    });
+    _currentList = list;
+    renderPage(list);
+  }
 
-    document.getElementById('result-count').innerHTML = '<i class="fa-solid fa-list-ul"></i> 搜尋結果：' + list.length + ' 筆';
+  function renderPage(list) {
+    var total = list.length;
+    var limit = currentPage * PAGE_SIZE;
+    var page = list.slice(0, limit);
+    var hasMore = limit < total;
+
+    document.getElementById('result-count').innerHTML = '<i class="fa-solid fa-list-ul"></i> 搜尋結果：' + total + ' 筆' +
+      (total > PAGE_SIZE ? ' <span style="color:var(--text-muted);font-weight:400">(顯示 ' + page.length + ')</span>' : '');
 
     var container = document.getElementById('list');
-    if (list.length === 0) {
+    if (page.length === 0) {
       container.innerHTML = '<div style="text-align:center; padding:3rem; color:var(--text-muted)">尚無符合條件的標案</div>';
     } else {
-      container.innerHTML = list.map(function(item) {
+      container.innerHTML = page.map(function(item) {
         var roiColor = item.roi >= 100 ? '#e11d48' : (item.roi >= 50 ? '#d97706' : '#64748b');
-        var addrSafe = (item.address || '').replace(/'/g, '&#39;');
+        var addrSafe = (item.address || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         return '<div class="item">' +
           '<div class="card-top">' +
             '<div class="county-tag">' + (item.county || '') + '</div>' +
@@ -379,9 +409,16 @@
           (item.pdf_url ? '<a href="' + item.pdf_url + '" target="_blank" class="btn-pdf">查看官方公告 <i class="fa-solid fa-arrow-up-right-from-square"></i></a>' : '') +
         '</div>';
       }).join('');
+
+      if (hasMore) {
+        container.innerHTML +=
+          '<div style="text-align:center; padding:0.5rem 0 1rem">' +
+            '<button onclick="currentPage++;renderPage(_currentList)" style="padding:0.7rem 2rem;background:var(--primary);color:white;border:none;border-radius:100px;font-size:0.9rem;font-weight:700;cursor:pointer">顯示更多 (' + (total - limit) + ' 筆)</button>' +
+          '</div>';
+      }
     }
 
-    if (isRestricted) {
+    if (isRestricted && page.length > 0) {
       var title = '發現更多高回報物件';
       var desc = '目前的 [訪客] 模式僅能預覽 3 筆案件。請輸入您的 Email 帳號以查看更多資料。';
       if (userRole === 'free') {
@@ -399,7 +436,7 @@
   }
 
   function initCounty() {
-    var all = rawData.general.concat(rawData.special);
+    var all = rawData[currentTab] || [];
     var counties = all.map(function(d) { return d.county; }).filter(Boolean);
     counties = counties.filter(function(v, i, a) { return a.indexOf(v) === i; }).sort();
     var select = document.getElementById('f-county');
@@ -411,11 +448,19 @@
     currentTab = t;
     document.getElementById('t-gen').classList.toggle('active', t === 'general');
     document.getElementById('t-buy').classList.toggle('active', t === 'special');
+    initCounty();
     render();
   }
 
   function copy(t) {
-    navigator.clipboard.writeText(t);
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(t);
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta);
+    }
     document.getElementById('toast').style.opacity = 1;
     setTimeout(function() { document.getElementById('toast').style.opacity = 0; }, 2000);
   }
@@ -428,6 +473,9 @@
   function closeLoginModal() {
     document.getElementById('login-modal').style.display = 'none';
   }
+  document.getElementById('login-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeLoginModal();
+  });
 
   function submitEmail() {
     var input = document.getElementById('login-email').value.trim();

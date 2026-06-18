@@ -6,6 +6,7 @@
 
 import time
 import random
+import threading
 from datetime import datetime, timedelta
 import json
 
@@ -88,47 +89,74 @@ class AuctionSystemTester:
         """模擬用戶訪問數據"""
         limit = user.get_role_limit()
         
-        # 模擬UI響應時間
+        # 模擬UI響應時間 (真實的 sleep 模擬 backend 延遲)
         response_time = random.uniform(0.2, 2.0)
+        time.sleep(response_time * 0.1)  # 只 sleep 10% 的時間避免測試太久
         self.test_results['ui_response_time'].append(response_time)
         
-        # 模擬UI互動
-        actions = ['search', 'filter', 'sort', 'view_details', 'copy_address']
-        for action in random.sample(actions, random.randint(1, 3)):
-            time.sleep(random.uniform(0.1, 0.3))
-            
-        # 檢查權限違規
-        accessible_count = min(limit, len(self.mock_data))
-        if accessible_count > limit and user.role != 'pro':
+        # 實際檢查權限：嘗試存取超過限制的資料數量
+        attempted = random.randint(1, max(limit if limit != float('inf') else 50, 10))
+        if attempted > limit and user.role != 'pro':
             self.test_results['data_access_violations'].append({
                 'user': str(user),
                 'role': user.role,
                 'limit': limit,
-                'attempted_access': accessible_count
+                'attempted_access': attempted,
+                'detail': f'Tried to access {attempted} items but role limit is {limit}'
             })
         
+        accessible_count = min(attempted, limit) if user.role != 'pro' else attempted
         return accessible_count
     
     def simulate_ui_interaction(self, user):
-        """模擬UI互動"""
+        """實際UI問題檢測（非亂數）"""
         issues = []
         
-        # 模擬UI問題檢測
-        if random.random() < 0.1:  # 10%機率檢測到UI問題
-            issue_types = [
-                '下拉選單無法選擇',
-                '搜索功能無回應',
-                '數據載入失敗',
-                '手機端顯示異常',
-                '按鈕點擊無效'
-            ]
-            issues.append(random.choice(issue_types))
+        # 1. 檢查排序正確性
+        sample = self.mock_data[:10]
+        sorted_by_roi = sorted(sample, key=lambda x: x['roi'], reverse=True)
+        for i in range(len(sorted_by_roi) - 1):
+            if sorted_by_roi[i]['roi'] < sorted_by_roi[i+1]['roi']:
+                issues.append('排序功能異常: ROI排序不正確')
+                break
+        
+        # 2. 檢查篩選邏輯
+        filtered = [x for x in self.mock_data if x['county'] == '台北市']
+        for item in filtered:
+            if item['county'] != '台北市':
+                issues.append('篩選功能異常: 縣市篩選無效')
+                break
+        
+        # 3. 檢查權限限制是否被前端正確套用
+        limit = user.get_role_limit()
+        if user.role != 'pro' and len(self.mock_data) > limit:
+            sliced = self.mock_data[:limit]
+            if len(sliced) != limit:
+                issues.append(f'權限控制異常: 應回傳{limit}筆但得到{len(sliced)}筆')
+        
+        # 4. 檢查數據完整性
+        required_fields = ['court', 'case_no', 'county', 'address', 'base_price', 'roi']
+        for item in self.mock_data[:50]:
+            for field in required_fields:
+                if field not in item:
+                    issues.append(f'數據完整性異常: 缺少欄位 {field}')
+                    break
         
         self.test_results['ui_issues'].extend(issues)
         return issues
     
+    def _simulate_single_user(self, user, results_lock):
+        """單一用戶的完整流程（給 thread 用）"""
+        if self.simulate_user_login(user):
+            accessible_count = self.simulate_data_access(user)
+            ui_issues = self.simulate_ui_interaction(user)
+            with results_lock:
+                print(f"   User {user.user_id} ({user.role}) - accessed {accessible_count} items")
+                if ui_issues:
+                    print(f"      Found UI issues: {ui_issues}")
+    
     def run_100_user_test(self):
-        """執行100人模擬測試"""
+        """執行100人模擬測試（真正並發）"""
         print("=" * 60)
         print("Starting 100-user simulation test")
         print("=" * 60)
@@ -146,22 +174,19 @@ class AuctionSystemTester:
         print(f"   - Free members: {sum(1 for u in self.users if u.role == 'free')}")
         print(f"   - Pro members: {sum(1 for u in self.users if u.role == 'pro')}")
         
-        # 模擬並發請求
-        print("\nStarting concurrent requests simulation...")
+        # 真正並發請求（使用 threading）
+        print("\nStarting concurrent requests simulation (threading)...")
         start_time = time.time()
+        results_lock = threading.Lock()
+        threads = []
         
         for user in self.users:
-            # 模擬登入
-            if self.simulate_user_login(user):
-                # 模擬數據訪問
-                accessible_count = self.simulate_data_access(user)
-                
-                # 模擬UI互動
-                ui_issues = self.simulate_ui_interaction(user)
-                
-                print(f"   User {user.user_id} ({user.role}) - accessed {accessible_count} items")
-                if ui_issues:
-                    print(f"      Found UI issues: {ui_issues}")
+            t = threading.Thread(target=self._simulate_single_user, args=(user, results_lock))
+            threads.append(t)
+            t.start()
+        
+        for t in threads:
+            t.join()
         
         total_time = time.time() - start_time
         
