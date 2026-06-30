@@ -88,6 +88,7 @@ function doGet(e) {
   const limit = role === 'pro' ? Infinity : (role === 'free' ? 10 : 3);
   return ContentService
     .createTextOutput(JSON.stringify({
+      version:   CONST_VERSION,
       general:   allData.general.slice(0, limit),
       special:   allData.special.slice(0, limit),
       updatedAt: allData.updatedAt,
@@ -152,6 +153,7 @@ function getSheetData() {
 
   const limit = role === 'pro' ? Infinity : (role === 'free' ? 10 : 3);
   return {
+    version:   CONST_VERSION,
     general:   allData.general.slice(0, limit),
     special:   allData.special.slice(0, limit),
     updatedAt: allData.updatedAt,
