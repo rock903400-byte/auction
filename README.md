@@ -1,112 +1,45 @@
-# 法拍補償 PRO 系統 (Foreclosure Compensation PRO)
+# auction
 
-本專案是一個針對台灣法拍土地投資的監控與分析系統。它能自動抓取司法院法拍資訊，並根據特定公式（面積 × 6 元/m²）計算預估補償金與投資報酬率 (ROI)，提供會員分級瀏覽功能。
+> 法拍補償 PRO 系統 (Foreclosure Compensation PRO) — 台灣法拍土地投資監控與分析系統
 
-## 系統架構
+## 功能特色
 
-本專案採用雙軌架構：**生產環境 (Google Apps Script)** 與 **審核/驗證工具 (Python)**。
+- **雙軌系統架構**：以 Google Apps Script 生產環境（爬蟲 + 試算表 Web App）配合 Python 本地數據驗證工具。
+- **動態法拍爬取**：自動化抓取司法院最新的法拍土地與案件資訊。
+- **補償金精算**：自動依據「面積 × 6 元/m²」公式試算預估補償金與投資回報率 (ROI)。
+- **權限與分級**：提供訪客、一般會員、專業會員等多層次存取。
 
-### 1. 生產環境 (Production)
-```
-司法院 API → GAS 爬蟲 → Google 試算表 (資料庫) → GAS Web App (API & UI)
-```
-- **核心邏輯**：位於 Google Apps Script (`.gs` 檔案)。
-- **資料儲存**：使用 Google 試算表作為輕量級資料庫。
-- **身分驗證**：整合 Google 帳戶與自定義「會員名單」工作表進行權限控管。
-- **前端網頁**：`index.html` 可部署於 GAS Web App 或 GitHub Pages。
+## 技術棧
 
-### 2. 審核與驗證工具 (Auditing & Verification)
-```
-司法院 API / JSON 資料 ←→ Python 腳本 ←→ Excel 匯出檔
-```
-- **目的**：用於確保 GAS 爬蟲邏輯的準確性、對比數據差異、進行大規模數據分析。
-- **工具**：一系列 Python 腳本，用於交叉比對 (`cross_check`)、深入驗證 (`deep_verify`) 與統計分析。
-
----
-
-## 主要組件說明
-
-### Google Apps Script (GAS)
-- **`法拍清單(一般).gs`**: 負責抓取一般法拍案件。
-- **`法拍清單(應買).gs`**: 負責抓取應買公告案件。
-- **`後端.gs`**: 提供 Web API、分段快取機制 (`ChunkedCache`)、權限驗證與資料處理邏輯。
-
-### 前端介面
-- **`index.html` / `live_site.html`**: 現代化的單頁應用 (SPA)，支援行動端，包含搜尋、過濾、會員登入與骨架屏 (Skeleton Loading) 效果。
-
-### Python 驗證工具
-- **`fetch_data.py`**: 下載原始 JSON 數據供本地分析使用。
-- **`cross_check_v4.py`**: 對比 GAS 處理結果與原始數據，確保欄位計算無誤。
-- **`deep_verify_excel.py`**: 深度驗證匯出的 Excel 檔案內容。
-- **`analyze_keywords.py`**: 針對案件描述進行關鍵字分析。
-
----
-
-## 核心業務邏輯 (Business Logic)
-
-系統在抓取與分析時遵循以下過濾規則：
-
-### 1. 篩選條件
-- **地區過濾**: 僅針對特定的 40 多個偏鄉/原鄉地區進行追蹤（如：大同鄉、南澳鄉、阿里山鄉等）。
-- **持分比例**: 僅保留「全部」或「1分之1」的案件，排除持分不完整的土地。
-- **案件類型**:
-    - **一般法拍**: `saleno` 為 1, 2, 3, 4, 6, 7。
-    - **應買公告**: `saleno` 為 99。
-
-### 2. 計算公式
-- **預估補償金** = `Math.ceil(面積(m²) × 6)`  (依據相關補償規定估算)。
-- **ROI (%)** = `預估補償金 / 拍賣底價 × 100`。
-
----
-
-## 數據結構 (試算表 25 欄)
-
-| 索引 | 欄位名稱 | 說明 |
-|---|---|---|
-| A–F | 基本資訊 | 筆次、法院、案號、股別、日期、拍次 |
-| G–J | 地點與價格 | 縣市、地址、面積、底價 |
-| K–T | 詳細參數 | 點交、空地、標別、備註、地圖等 |
-| **U** (20) | **預估補償金** | 計算公式：`Math.ceil(面積m2 × 6)` |
-| **V** (21) | **ROI (%)** | 計算公式：`預估補償金 / 底價 × 100` |
-| **W–Y** | 進階欄位 | PDF 連結、是否點交(純文字)、是否空地(純文字) |
-
----
-
-## 會員權限機制
-
-系統讀取試算表中的「會員名單」工作表：
-- **Visitor (訪客)**: 僅能查看 3 筆資料。
-- **Free (一般會員)**: 可查看 10 筆資料。
-- **Pro (專業會員)**: 可查看完整數據。
-
----
+- **Production Backend**: Google Apps Script (GAS)
+- **Verification Tools**: Python (BeautifulSoup4, Pandas)
+- **Database / Sheets**: Google Sheets, Excel
+- **Frontend**: HTML / CSS
 
 ## 快速開始
 
-### 部署 GAS 生產環境
-1. 建立一個 Google 試算表。
-2. 開啟「擴充功能 > Apps Script」，將本專案的 `.gs` 與 `index.html` 內容貼入。
-3. 執行 `initMembershipSheet()` 初始化權限表。
-4. 部署為「網頁應用程式」，設定為「任何人」均可存取。
+### 1. 部署 Google Apps Script
+將專案中所有的 `.gs` 檔案上傳至您的 Google Apps Script 專案，並部署為 Web App。
 
-### 運行本地驗證
-1. 安裝 Python 依賴：`pip install pandas requests`
-2. 執行 `fetch_data.py` 取得最新數據。
-3. 使用 `cross_check_v4.py` 驗證數據一致性。
+### 2. 執行 Python 數據驗證
+```bash
+pip install -r requirements.txt
+python fetch_data.py
+```
 
----
+## 專案結構
 
----
+```text
+/
+├── 常數.gs             # 公式權重與常數定義
+├── 後端.gs             # API 處理與網頁路由
+├── 法拍清單(一般).gs   # 一般法拍案件爬取
+├── 法拍清單(應買).gs   # 應買法拍案件爬取
+├── fetch_data.py       # 本地法拍資料下載腳本
+├── analyze_*.py        # ROI 與案源數據分析工具
+└── verify_*.py         # 計算公式與數據一致性校驗
+```
 
-## 已知問題與待處理 (Known Issues)
+## License
 
-- **權限偵測**: 部署 Web App 時需選擇「存取權限：任何人 (具有 Google 帳戶)」。若前端抓不到 Email，需在 `index.html` 加入強制授權提示。
-- **座標精確度**: 目前地圖連結以地址字串拼接，若無門牌地號可能定位失敗。計畫未來整合地籍圖資網路便民服務系統。
-
-## 最近更新 (2026-05-10)
-- **快取優化**: `後端.gs` 新增分段快取，突破 GAS 100KB 限制。
-- **權限自動化**: 新增 `initMembershipSheet` 自動建立權限表。
-- **前後端分離**: 支援將前端部署於 GitHub Pages，透過 Web API 存取 GAS 數據。
-
----
-*詳細歷史文件請參閱：[GAS 遷移計畫 (已完成)](GAS_MIGRATION_PLAN.md)*
+MIT
