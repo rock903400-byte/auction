@@ -97,20 +97,11 @@ function scrapeLandStableBatch_Buy() {
     } while (allFetchedData.length < totalRecords);
 
     if (allFetchedData.length > 0) {
-      const now = new Date();
-      const rocYear = now.getFullYear() - 1911;
-      const rocMonth = (now.getMonth() + 1).toString().padStart(2, '0');
-      const rocDay = now.getDate().toString().padStart(2, '0');
-      const todayROC = "0" + rocYear + rocMonth + rocDay;
-
       const uniqueData = new Map();
 
       allFetchedData.forEach(item => {
         const share = (item.rrange || "").trim();
         if (share !== "全部") return;
-
-        const saleDate = String(item.saledate || "0").padStart(8, '0');
-        if (saleDate < todayROC) return;
 
         const uniqueKey = item.hsimun + item.crmyy + item.crmid + item.crmno + (item.saleno || "") + (item.batchno || "") + (item.sec || "") + (item.landno || "");
         if (!uniqueData.has(uniqueKey)) {
