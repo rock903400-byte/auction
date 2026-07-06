@@ -102,24 +102,29 @@ function scrapeLandStableBatch_Buy() {
     } while (allFetchedData.length < totalRecords);
 
     if (allFetchedData.length > 0) {
-      // 建立一個 Map 用於去重 
+      const now = new Date();
+      const rocYear = now.getFullYear() - 1911;
+      const rocMonth = (now.getMonth() + 1).toString().padStart(2, '0');
+      const rocDay = now.getDate().toString().padStart(2, '0');
+      const todayROC = "0" + rocYear + rocMonth + rocDay;
+
       const uniqueData = new Map();
 
       allFetchedData.forEach(item => {
-        // 🔴 修正：信任 API 分類。僅過濾權利範圍。
         const share = (item.rrange || "").trim();
-        if (share && share !== "全部" && share !== "1分之1") return;
+        if (share !== "全部") return;
 
-        // 🔴 修正：使用更細緻的 Key (包含土地座落)，確保每一筆土地都保留 (符合 138 筆需求)
+        const saleDate = String(item.saledate || "0").padStart(8, '0');
+        if (saleDate < todayROC) return;
+
         const uniqueKey = item.hsimun + item.crmyy + item.crmid + item.crmno + (item.saleno || "") + (item.batchno || "") + (item.sec || "") + (item.landno || "");
-        
         if (!uniqueData.has(uniqueKey)) {
           uniqueData.set(uniqueKey, item);
         }
       });
 
       const filteredData = Array.from(uniqueData.values());
-      Logger.log("🧹 應買篩選後總筆數: " + filteredData.length + " 筆 (應為 138 筆)");
+      Logger.log("🧹 應買篩選後總筆數: " + filteredData.length + " 筆");
 
       let allRows = filteredData.map((item, index) => {
         const totalSum = getSafeNum(item.summinprc);

@@ -59,6 +59,22 @@ function doGet(e) {
     }
   }
 
+  // Remote action endpoints (for clasp-free remote execution)
+  if (params.action === 'refreshSession') {
+    try { var ok = refreshSession(); } catch (e) { ok = false; }
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: ok }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  if (params.action === 'scrapeGeneral') {
+    try { scrapeLandStableBatch_General(); return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON); }
+    catch (err) { return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message })).setMimeType(ContentService.MimeType.JSON); }
+  }
+  if (params.action === 'scrapeBuy') {
+    try { scrapeLandStableBatch_Buy(); return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON); }
+    catch (err) { return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message })).setMimeType(ContentService.MimeType.JSON); }
+  }
+
   const email = params.email ? params.email.trim() : '';
   const role = email ? checkUserRole(email) : 'visitor';
 
@@ -77,7 +93,9 @@ function doGet(e) {
         special:   extractData(ss.getSheetByName(SHEET_NAMES.SPECIAL)),
         updatedAt: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
       };
-      putChunkedCache(cache, CACHE_KEY, JSON.stringify(allData), CACHE_TTL);
+      if (allData.general.length > 0 || allData.special.length > 0) {
+        putChunkedCache(cache, CACHE_KEY, JSON.stringify(allData), CACHE_TTL);
+      }
     } catch (err) {
       return ContentService
         .createTextOutput(JSON.stringify({ error: err.message }))
@@ -144,7 +162,9 @@ function getSheetData() {
         special:   extractData(ss.getSheetByName(SHEET_NAMES.SPECIAL)),
         updatedAt: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
       };
-      putChunkedCache(cache, CACHE_KEY, JSON.stringify(allData), CACHE_TTL);
+      if (allData.general.length > 0 || allData.special.length > 0) {
+        putChunkedCache(cache, CACHE_KEY, JSON.stringify(allData), CACHE_TTL);
+      }
     } catch (e) {
       Logger.log('getSheetData 錯誤：' + e.message);
       return { general: [], special: [], updatedAt: null, error: e.message, userEmail: email, userRole: role };

@@ -382,6 +382,7 @@ function debugFilterCounts(saletypeOverride) {
   var todayROC = "0" + rocYear + mm + dd;
 
   var cnt_share = 0;
+  var cnt_share_full = 0, cnt_share_1of1 = 0, cnt_share_empty = 0, cnt_share_other_r = 0;
   var cnt_saleno_123 = 0, cnt_saleno_4 = 0, cnt_saleno_56 = 0, cnt_saleno_99 = 0;
   var cnt_saleno_12346 = 0;
   var cnt_date = 0, cnt_dedup = 0;
@@ -411,6 +412,10 @@ function debugFilterCounts(saletypeOverride) {
   for (var i = 0; i < allResults.length; i++) {
     var item = allResults[i];
     var share = (item.rrange || "").trim();
+    if (share === "全部") cnt_share_full++;
+    else if (share === "1分之1") cnt_share_1of1++;
+    else if (share === "") cnt_share_empty++;
+    else cnt_share_other_r++;
     if (share !== "全部") continue;
     cnt_share++;
 
@@ -442,6 +447,8 @@ function debugFilterCounts(saletypeOverride) {
 
   Logger.log("===== 原始 API 總計 =====");
   Logger.log("總筆數: " + allResults.length);
+  Logger.log("===== 權利範圍分布 (全部原始) =====");
+  Logger.log("全部: " + cnt_share_full + " | 1分之1: " + cnt_share_1of1 + " | 空白: " + cnt_share_empty + " | 其他: " + cnt_share_other_r);
   Logger.log("===== 篩選 權利範圍=全部 =====");
   Logger.log("通過: " + cnt_share + " (移除: " + (allResults.length-cnt_share) + ")");
   Logger.log("===== 各拍次分布 =====");
@@ -467,6 +474,10 @@ function debugFilterCounts(saletypeOverride) {
 
   return {
     raw_total: allResults.length,
+    share_full: cnt_share_full,
+    share_1of1: cnt_share_1of1,
+    share_empty: cnt_share_empty,
+    share_other: cnt_share_other_r,
     after_share_all: cnt_share,
     saleno_123: cnt_saleno_123,
     saleno_4: cnt_saleno_4,
