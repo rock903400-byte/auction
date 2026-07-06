@@ -100,7 +100,6 @@ function scrapeLandStableBatch_General() {
   const targetSheetName = "法拍清單(一般)";
   let sheet = ss.getSheetByName(targetSheetName);
   if (!sheet) { sheet = ss.insertSheet(targetSheetName); }
-  sheet.clear(); 
 
   const headers = [
     "筆次", "法院名稱", "案號", "股別", "拍賣日期", "拍次",
@@ -110,10 +109,6 @@ function scrapeLandStableBatch_General() {
     "", "土地單價(元/㎡)",
     "預估補償金", "ROI (%)", "PDF 連結", "是否點交", "是否空地"
   ];
-  sheet.appendRow(headers);
-  sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold").setBackground("#2d6a4f").setFontColor("white");
-  sheet.getRange(1, 20).setBackground("#d9ead3").setFontColor("black");
-  sheet.getRange(1, 21, 1, 5).setBackground("#fff2cc").setFontColor("black");
 
   function getSafeNum(val) {
     if (val == null || val === '') return 0;
@@ -205,7 +200,7 @@ function scrapeLandStableBatch_General() {
       });
 
       const filteredData = Array.from(uniqueData.values());
-      Logger.log("🧹 篩選後總筆數: " + filteredData.length + " 筆 (應接近 277 筆)");
+      Logger.log("🧹 篩選後總筆數: " + filteredData.length + " 筆");
 
       // 拍次映射表
       const saleTypeMap = {
@@ -252,14 +247,23 @@ function scrapeLandStableBatch_General() {
       });
 
       if (allRows.length > 0) {
+        sheet.clear();
+        sheet.appendRow(headers);
+        sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold").setBackground("#2d6a4f").setFontColor("white");
+        sheet.getRange(1, 20).setBackground("#d9ead3").setFontColor("black");
+        sheet.getRange(1, 21, 1, 5).setBackground("#fff2cc").setFontColor("black");
         sheet.getRange(2, 1, allRows.length, allRows[0].length).setValues(allRows);
         sheet.getRange(2, 9, allRows.length, 1).setWrap(true);
         sheet.getRange(2, 20, allRows.length, 1).setNumberFormat("#,##0.00");
         sheet.getRange(2, 21, allRows.length, 1).setNumberFormat("#,##0");
         sheet.getRange(2, 22, allRows.length, 1).setNumberFormat("0.00");
         sheet.autoResizeColumns(1, 25);
+        Logger.log("🎯 【一般】清單更新完畢！");
+      } else {
+        notifyError("一般篩選後為0筆", new Error("filteredData empty"), {step: "scrapeGeneral", raw: allFetchedData.length, filtered: filteredData.length});
       }
-      Logger.log("🎯 【一般】清單更新完畢！");
+    } else {
+      notifyError("一般API回傳0筆", new Error("allFetchedData empty"), {step: "scrapeGeneral"});
     }
   } catch (e) {
     Logger.log("❌ 執行一般清單錯誤: " + e.message);
@@ -300,19 +304,33 @@ function initMembershipSheet() {
 }
 
 /**
- * 一鍵更新入口
+ * 一鍵更新入口（含 5 分鐘超時保護，避免 GAS 6 分鐘硬砍清空試算表）
  */
 function runAllUpdate() {
+  const startTime = Date.now();
+  function checkTimeout(step) {
+    if (Date.now() - startTime > 5 * 60 * 1000) {
+      notifyError("runAllUpdate 超時", new Error("執行超過 5 分鐘，提前中止"), {step: step, elapsed: Date.now() - startTime});
+      Logger.log("⏰ " + step + " 階段超過 5 分鐘，提前中止");
+      return true;
+    }
+    return false;
+  }
+
   initMembershipSheet();
+  if (checkTimeout("initMembershipSheet")) return;
   if (refreshSession()) {
     Logger.log("🚀 憑證已更新，開始完整抓取...");
+    if (checkTimeout("refreshSession")) return;
     scrapeLandStableBatch_General();
+    if (checkTimeout("scrapeGeneral")) return;
     if (typeof scrapeLandStableBatch_Buy === 'function') {
       scrapeLandStableBatch_Buy();
+      if (checkTimeout("scrapeBuy")) return;
     }
     Logger.log("✨ 所有清單更新完成！");
   } else {
-    SpreadsheetApp.getUi().alert("自動獲取憑證失敗，請檢查網路連線。");
+    notifyError("refreshSession 失敗", new Error("runAllUpdate 無法取得憑證"), {step: "runAllUpdate"});
   }
 }
 

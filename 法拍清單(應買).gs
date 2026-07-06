@@ -23,7 +23,6 @@ function scrapeLandStableBatch_Buy() {
   const targetSheetName = "法拍清單(應買)";
   let sheet = ss.getSheetByName(targetSheetName);
   if (!sheet) { sheet = ss.insertSheet(targetSheetName); }
-  sheet.clear(); 
 
   const headers_excel = [
     "筆次", "法院名稱", "案號", "股別", "拍賣日期", "特別程序",
@@ -33,10 +32,6 @@ function scrapeLandStableBatch_Buy() {
     "", "土地單價(元/㎡)",
     "預估補償金", "ROI (%)", "PDF 連結", "是否點交", "是否空地"
   ];
-  sheet.appendRow(headers_excel);
-  sheet.getRange(1, 1, 1, headers_excel.length).setFontWeight("bold").setBackground("#444444").setFontColor("white");
-  sheet.getRange(1, 20).setBackground("#d9ead3").setFontColor("black");
-  sheet.getRange(1, 21, 1, 5).setBackground("#fff2cc").setFontColor("black");
 
   function getSafeNum(val) {
     if (val == null || val === '') return 0;
@@ -159,16 +154,25 @@ function scrapeLandStableBatch_Buy() {
         ];
       });
 
-      sheet.getRange(2, 1, allRows.length, allRows[0].length).setValues(allRows);
-      sheet.getRange(2, 9, allRows.length, 1).setWrap(true);
-      sheet.getRange(2, 20, allRows.length, 1).setNumberFormat("#,##0.00");
-      sheet.getRange(2, 21, allRows.length, 1).setNumberFormat("#,##0");
-      sheet.getRange(2, 22, allRows.length, 1).setNumberFormat("0.00");
-      sheet.autoResizeColumns(1, 25);
-      Logger.log("🎯 【應買】清單更新完畢！");
+      if (allRows.length > 0) {
+        sheet.clear();
+        sheet.appendRow(headers_excel);
+        sheet.getRange(1, 1, 1, headers_excel.length).setFontWeight("bold").setBackground("#444444").setFontColor("white");
+        sheet.getRange(1, 20).setBackground("#d9ead3").setFontColor("black");
+        sheet.getRange(1, 21, 1, 5).setBackground("#fff2cc").setFontColor("black");
+        sheet.getRange(2, 1, allRows.length, allRows[0].length).setValues(allRows);
+        sheet.getRange(2, 9, allRows.length, 1).setWrap(true);
+        sheet.getRange(2, 20, allRows.length, 1).setNumberFormat("#,##0.00");
+        sheet.getRange(2, 21, allRows.length, 1).setNumberFormat("#,##0");
+        sheet.getRange(2, 22, allRows.length, 1).setNumberFormat("0.00");
+        sheet.autoResizeColumns(1, 25);
+        Logger.log("🎯 【應買】清單更新完畢！");
+      } else {
+        notifyError("應買篩選後為0筆", new Error("filteredData empty"), {step: "scrapeBuy", raw: allFetchedData.length, filtered: filteredData.length});
+      }
       
     } else {
-      Logger.log("ℹ️ 應買查詢成功，但目前沒有符合條件的標案。");
+      notifyError("應買API回傳0筆", new Error("allFetchedData empty"), {step: "scrapeBuy"});
     }
 
   } catch (e) {
