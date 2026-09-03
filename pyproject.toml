@@ -1,0 +1,17 @@
+[tool.ruff]
+line-length = 88
+exclude = ["__pycache__", ".ruff_cache", ".git", "*.xls", "fetched_data.json"]
+
+[tool.ruff.lint]
+# 核心檔案嚴格，Legacy 工具放寬
+[tool.ruff.lint.per-file-ignores]
+"analyze_*.py" = ["F841", "E402"]
+"check_*.py" = ["E402"]
+"count_total_rows.py" = ["E402"]
+"comprehensive_audit.py" = ["F841"]
+"find_extra*.py" = ["F841"]
+"key_comparison.py" = ["F841"]
+
+[tool.black]
+line-length = 88
+exclude = '(\\.git|__pycache__|\\.venv)'

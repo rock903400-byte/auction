@@ -414,6 +414,7 @@ function debugFilterCounts(saletypeOverride) {
   var mm = (now.getMonth()+1).toString().padStart(2,'0');
   var dd = now.getDate().toString().padStart(2,'0');
   var todayROC = "0" + rocYear + mm + dd;
+  var isGeneral = (saletypeVal === "1");
 
   var cnt_share = 0;
   var cnt_share_full = 0, cnt_share_1of1 = 0, cnt_share_empty = 0, cnt_share_other_r = 0;
@@ -468,12 +469,19 @@ function debugFilterCounts(saletypeOverride) {
     if (!saletitleDist[st]) saletitleDist[st] = 0;
     saletitleDist[st]++;
 
-    if (saleno !== "1" && saleno !== "2" && saleno !== "3" && saleno !== "4" && saleno !== "6") continue;
-    cnt_saleno_12346++;
+    // 內部小圈修正：saletype=4 應買無 saleno/日期過濾，僅 share=全部→去重
+    if (isGeneral) {
+      if (saleno !== "1" && saleno !== "2" && saleno !== "3" && saleno !== "4" && saleno !== "6") continue;
+      cnt_saleno_12346++;
 
-    var saleDate = String(item.saledate || "0").padStart(8,'0');
-    if (saleDate < todayROC) continue;
-    cnt_date++;
+      var saleDate = String(item.saledate || "0").padStart(8,'0');
+      if (saleDate < todayROC) continue;
+      cnt_date++;
+    } else {
+      // 應買：跳過 saleno/日期，對齊 法拍清單(應買).gs:107 的真實邏輯
+      cnt_saleno_12346 = cnt_share; // 佔位，避免 removed_by_saleno 誤導
+      cnt_date = cnt_share;
+    }
 
     var key = item.hsimun + item.crmyy + item.crmid + item.crmno + (item.saleno||"") + (item.batchno||"") + (item.sec||"") + (item.landno||"");
     if (!dedupSet[key]) { dedupSet[key] = true; cnt_dedup++; }
@@ -499,12 +507,20 @@ function debugFilterCounts(saletypeOverride) {
   for (var st in saletitleDist) {
     Logger.log("  " + st + ": " + saletitleDist[st]);
   }
-  Logger.log("===== 篩選 拍次 1/2/3/4/6 =====");
-  Logger.log("通過: " + cnt_saleno_12346 + " (移除: " + (cnt_share-cnt_saleno_12346) + ")");
-  Logger.log("===== 過濾過期 (today=" + todayROC + ") =====");
-  Logger.log("通過: " + cnt_date + " (移除: " + (cnt_saleno_12346-cnt_date) + ")");
+  if (isGeneral) {
+    Logger.log("===== 篩選 拍次 1/2/3/4/6 =====");
+    Logger.log("通過: " + cnt_saleno_12346 + " (移除: " + (cnt_share-cnt_saleno_12346) + ")");
+    Logger.log("===== 過濾過期 (today=" + todayROC + ") =====");
+    Logger.log("通過: " + cnt_date + " (移除: " + (cnt_saleno_12346-cnt_date) + ")");
+  } else {
+    Logger.log("===== 跳過 拍次/日期 (saletype=" + saletypeVal + " 應買無此過濾) =====");
+  }
   Logger.log("===== 去重後 =====");
-  Logger.log("通過: " + cnt_dedup + " (移除: " + (cnt_date-cnt_dedup) + ")");
+  if (isGeneral) {
+    Logger.log("通過: " + cnt_dedup + " (移除: " + (cnt_date-cnt_dedup) + ")");
+  } else {
+    Logger.log("通過: " + cnt_dedup + " (移除: " + (cnt_share-cnt_dedup) + ")");
+  }
 
   return {
     raw_total: allResults.length,
@@ -528,9 +544,10 @@ function debugFilterCounts(saletypeOverride) {
     after_date: cnt_date,
     removed_by_date: cnt_saleno_12346 - cnt_date,
     after_dedup: cnt_dedup,
-    removed_by_dedup: cnt_date - cnt_dedup,
+    removed_by_dedup: isGeneral ? (cnt_date - cnt_dedup) : (cnt_share - cnt_dedup),
     today_roc: todayROC,
     saletype_used: saletypeVal,
+    isGeneral: isGeneral,
     saletitle_dist: saletitleDist,
     first_fields: firstFields,
     para_by_saleno: paraBySaleno

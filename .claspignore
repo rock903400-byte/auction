@@ -1,0 +1,13 @@
+**/*.xls
+**/*.xlsx
+fetched_data.json
+__pycache__/
+.ruff_cache/
+.git/
+.github/
+*.log
+.env
+
+# GAS 不需要的前端模板與工具
+# live_site.html 仍推上 GAS 僅供參考，若要排除可取消下一行註解
+# live_site.html

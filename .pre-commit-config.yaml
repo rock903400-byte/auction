@@ -1,0 +1,18 @@
+repos:
+  - repo: local
+    hooks:
+      - id: verify-version
+        name: 版號同步檢查
+        entry: python verify_version.py --strict
+        language: system
+        pass_filenames: false
+      - id: ruff-check
+        name: ruff 檢查
+        entry: ruff check .
+        language: system
+        pass_filenames: false
+      - id: black-check
+        name: black 檢查
+        entry: black --check .
+        language: system
+        pass_filenames: false

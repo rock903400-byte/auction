@@ -1,0 +1,20 @@
+name: 版號與品質檢查
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff black
+      - run: python verify_version.py --strict
+      - run: ruff check .
+      - run: black --check .
