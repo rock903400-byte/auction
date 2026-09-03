@@ -36,7 +36,7 @@ function scrapeLandStableBatch_Buy() {
   function getSafeNum(val) {
     if (val == null || val === '') return 0;
     const n = parseFloat(String(val).replace(/,/g, ''));
-    return isNaN(n) ? 0 : Math.floor(n);
+    return (!isFinite(n) || isNaN(n)) ? 0 : Math.floor(n);
   }
 
   try {
@@ -49,8 +49,13 @@ function scrapeLandStableBatch_Buy() {
     let totalRecords = 0;
     const pageSize = 100;
 
-    // 🔴 循環抓取分頁 (應買程序)
+    const __loopStart = Date.now();
+    // 🔴 循環抓取分頁 (應買程序，含超時保護)
     do {
+      if (Date.now() - __loopStart > 4.5 * 60 * 1000) {
+        Logger.log("⏰ 應買分頁已超 4.5 分鐘，提前中止，已抓 " + allFetchedData.length + "/" + totalRecords);
+        break;
+      }
       Logger.log("📄 正在抓取第 " + currentPage + " 頁 (應買)...");
       const payload = {
         "proptype": "C51",
@@ -116,7 +121,9 @@ function scrapeLandStableBatch_Buy() {
         const totalSum = getSafeNum(item.summinprc);
         let individualPrice = getSafeNum(item.minprice) || getSafeNum(item.minprc) || totalSum;
 
-        const areaM2 = parseFloat(item.area3) || 0;
+        let _rawArea = parseFloat(item.area3);
+        if (!isFinite(_rawArea) || _rawArea < 0) _rawArea = 0;
+        const areaM2 = _rawArea;
         const areaTsubo = Math.round(areaM2 * 0.3025);
         
         const areaDisplay = areaTsubo + "坪(" + areaM2.toFixed(2) + "平方公尺) x " + (item.rrange || "全部") + "\n土地拍賣底價:新台幣 " + individualPrice.toLocaleString() + " 元";

@@ -1,3 +1,11 @@
 .clasp.json
 __pycache__/
 *.pyc
+fetched_data.json
+*.xls
+*.xlsx
+*.log
+.env
+credentials.json
+token.json
+.DS_Store

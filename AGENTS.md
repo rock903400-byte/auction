@@ -1,71 +1,82 @@
 # AGENTS.md — 法拍補償 PRO
 
-## 專案結構
+GAS Web App（GAS 爬蟲 + Google Sheets + 純 HTML 前端）。無 npm/bundler，前端從 GitHub Pages 跨域呼叫 GAS。
 
-```
-法拍清單(一般).gs   → 爬蟲：抓一般法拍資料 (saletype=1)
-法拍清單(應買).gs   → 爬蟲：抓應買資料 (saletype=4)
-後端.gs             → Web App API 入口 (doGet), 讀 Sheet → JSON
-常數.gs             → CONST_KEYWORDS (47 偏鄉關鍵字) + CONST_VERSION + notifyError()
-index.html          → 前端（GitHub Pages 部署）
-live_site.html      → 前端模板（WIP, WEB_APP_URL 留空）
-*.py                → Legacy 分析腳本，非必要勿改
-```
+## 架構
 
-## 版本管理
+| 檔案 | 角色 |
+|---|---|
+| `法拍清單(一般).gs` | 爬蟲：saletype=1，保留全部拍次 + 日期過濾 |
+| `法拍清單(應買).gs` | 爬蟲：saletype=4，**無日期過濾**，僅 share=全部 + 去重 |
+| `後端.gs` | Web App API 入口（doGet），讀 Sheet 回傳 JSON + 分塊快取 |
+| `常數.gs` | CONST_KEYWORDS（47 偏鄉）、CONST_VERSION、notifyError |
+| `index.html` | 前端（GitHub Pages 部署） |
+| `live_site.html` | 前端模板（WIP，WEB_APP_URL 留空） |
+| `*.py` | Legacy 驗證工具，非必要勿改 |
+
+## 使用者權限
+
+visitor=3 筆、free=10 筆、pro=無限。會員資料在「會員名單」工作表（A=Email, B=role）。
+
+## 爬蟲篩選邏輯
+
+篩選順序：share=全部 → （一般：日期過濾） → 去重
+
+- **一般**：share="全部" + `saleDate >= todayROC`（跳過過期） + 去重 → **保留全部拍次**
+- **應買**：share="全部" + 去重 → **無日期過濾，無拍次過濾**
+
+兩者均透過 CONST_KEYWORDS（47 偏鄉）篩選地區。
+
+## 計算
+
+補償金 = `Math.ceil(areaM2 × 6)`，ROI = 補償金 / 底價 × 100
+
+## Debug
+
+`?debug=1&saletype=X&token=ADMIN_TOKEN` 回傳逐層筆數。注意 debug 內含 `saleno 1/2/3/4/6` 過濾（在日期檢查前），**不等於實際爬蟲邏輯**，尤其 saletype=4 時 after_dedup 會誤導。
+
+Remote actions（不需 clasp 即可觸發爬蟲，需 ADMIN_TOKEN）：
+`?action=refreshSession&token=xxx` → `?action=scrapeGeneral&token=xxx` → `?action=scrapeBuy&token=xxx`
+> `ADMIN_TOKEN` 設於 GAS 專案屬性：`PropertiesService.getScriptProperties().setProperty('ADMIN_TOKEN','xxx')`
+
+## 設定
+
+「設定(驗證資訊)」工作表存放：B1=Cookie、B2=CSRF、B3=Token、B4=通知信箱。
+
+## 版本號
 
 三處需同步更新：
-- `常數.gs:3` → `CONST_VERSION`（後端 API 回傳）
-- `index.html:245` → `APP_VERSION`（前端比對基準）
-- `index.html:247` → `WEB_APP_URL`（部署新版後更新網址）
+- `常數.gs:3` → `CONST_VERSION`
+- `index.html:245` → `APP_VERSION`  
+- `index.html:247` → `WEB_APP_URL`
 
 前端載入時比對 `data.version` vs `APP_VERSION`，不符時 toast 提示重整。
-
-## API 關鍵行為
-
-- `saletype=1` = 一般程序，`saletype=4` = 應買/特別程序
-- 篩選：只追蹤 47 偏鄉（`CONST_KEYWORDS`）、持分須為「全部」
-- 計算：補償金 = `ceil(面積m² × 6)`、ROI = 補償金 / 底價 × 100
-- 權限：visitor=3 筆、free=10 筆、pro=無限
-- 快取：分段快取（ChunkedCache）突破 GAS 100KB 限制，TTL=5 分鐘
-
-## 拍次映射
-
-```
-"1":"第一拍","2":"第二拍","3":"第三拍","4":"第四拍",
-"5":"第五拍","6":"第六拍","7":"第七拍","8":"第八拍","9":"第九拍",
-"99":"公告"
-```
-
-## 錯誤通知
-
-三處觸發（上下文 step 名）：`refreshSession`、`scrapeGeneral`、`scrapeBuy`
-通知信箱存放於「設定(驗證資訊)」B4，預設 fallback 至 `rock90340@gmail.com`
 
 ## 部署
 
 ```bash
-clasp push                    # 上傳 .gs + .html 到 GAS
-clasp deploy -d "說明"        # 產生新版本 URL（如 @16）
-git add . && git commit -m "" && git push  # 更新 GitHub Pages
+clasp push                   # 上傳所有檔案到 GAS
+clasp undeploy <舊版URL>     # 先移除舊版
+clasp deploy -d "說明"       # 產生新版 URL（如 @22）
+# 更新 index.html:247 的 WEB_APP_URL → 新版 URL
+clasp push                   # 同步 index.html
+git add -A && git commit -m "" && git push
 ```
 
-GAS Web App 設定（`appsscript.json`）：`executeAs: USER_DEPLOYING`、`access: ANYONE_ANONYMOUS`
-Google Sheet 需有工作表：`法拍清單(一般)`、`法拍清單(應買)`、`會員名單`
+GAS 設定（appsscript.json）：`executeAs: USER_DEPLOYING`、`access: ANYONE_ANONYMOUS`、`runtimeVersion: V8`。
 
 ## 開發命令
 
 ```bash
-black .                     # format
-ruff check . --fix          # lint auto-fix
-ruff check .                # lint check
-python test_100_users.py    # mock 測試（不需外部服務）
+black .
+ruff check . --fix
+ruff check .
+python test_100_users.py     # mock 測試（不需外部服務）
 ```
 
-執行順序：`black → ruff check . --fix → ruff check . → python test_100_users.py`
+## 已知陷阱
 
-## 前端注意
-
-- 無 TypeScript / npm / bundler（純 HTML + JS CDN）
-- `copy()` 在 HTTP 環境有 textarea fallback
-- GitHub Pages：`rock903400-byte/auction`
+- `runAllUpdate` 含 5 分鐘超時 + `LockService`，分頁迴圈另有 4.5 分鐘保護，避免 GAS 6 分鐘限制中途寫入不完整數據
+- 應買**沒有**日期過濾（與一般不同），舊版曾錯誤加入導致筆數從 121 掉到 6
+- WEB_APP_URL 必須指向**最新部署版本**，否則前端連不上 API
+- `.clasp.json` 在 `.gitignore`（包含 scriptId），clone 後需自行設定

@@ -4,10 +4,13 @@ var CONST_VERSION = "1.1.2";
 
 // ─── 共用通知函式 ──────────────────────────────────────
 function notifyError(title, err, context) {
-  var remaining = MailApp.getRemainingDailyQuota();
-  if (remaining <= 0) return;
-
   try {
+    var remaining = 1;
+    try { remaining = MailApp.getRemainingDailyQuota(); } catch (_q) { remaining = 1; }
+    if (remaining <= 0) {
+      Logger.log("notifyError 跳過：Mail quota 已耗盡 - " + title);
+      return;
+    }
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var cfg = ss && ss.getSheetByName("設定(驗證資訊)");
 

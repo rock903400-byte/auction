@@ -113,7 +113,7 @@ function scrapeLandStableBatch_General() {
   function getSafeNum(val) {
     if (val == null || val === '') return 0;
     const n = parseFloat(String(val).replace(/,/g, ''));
-    return isNaN(n) ? 0 : Math.floor(n);
+    return (!isFinite(n) || isNaN(n)) ? 0 : Math.floor(n);
   }
 
   try {
@@ -133,8 +133,13 @@ function scrapeLandStableBatch_General() {
     const rocDay = now.getDate().toString().padStart(2, '0');
     const todayROC = "0" + rocYear + rocMonth + rocDay;
 
-    // 🔴 循環抓取分頁
+    const __loopStart = Date.now();
+    // 🔴 循環抓取分頁（含超時保護，避免 6 分鐘硬砍）
     do {
+      if (Date.now() - __loopStart > 4.5 * 60 * 1000) {
+        Logger.log("⏰ 一般分頁已超 4.5 分鐘，提前中止，已抓 " + allFetchedData.length + "/" + totalRecords);
+        break;
+      }
       Logger.log("📄 正在抓取第 " + currentPage + " 頁...");
       const payload = {
         "proptype": "C51",
@@ -219,7 +224,9 @@ function scrapeLandStableBatch_General() {
       let allRows = filteredData.map((item, index) => {
         const totalSum = getSafeNum(item.summinprc);
         let individualPrice = getSafeNum(item.minprice) || getSafeNum(item.minprc) || totalSum;
-        const areaM2 = parseFloat(item.area3) || 0;
+        let _rawArea = parseFloat(item.area3);
+        if (!isFinite(_rawArea) || _rawArea < 0) _rawArea = 0;
+        const areaM2 = _rawArea;
         const areaTsubo = Math.round(areaM2 * 0.3025);
         const areaDisplay = areaTsubo + "坪(" + areaM2.toFixed(2) + "平方公尺) x " + (item.rrange || "全部") + "\n底價: " + individualPrice.toLocaleString() + " 元";
         let unitPriceDisplay = (areaM2 > 0 && individualPrice > 0) ? parseFloat((individualPrice / areaM2).toFixed(2)) : 0;
@@ -304,33 +311,42 @@ function initMembershipSheet() {
 }
 
 /**
- * 一鍵更新入口（含 5 分鐘超時保護，避免 GAS 6 分鐘硬砍清空試算表）
+ * 一鍵更新入口（含 5 分鐘超時保護 + LockService，避免併發清空試算表）
  */
 function runAllUpdate() {
-  const startTime = Date.now();
-  function checkTimeout(step) {
-    if (Date.now() - startTime > 5 * 60 * 1000) {
-      notifyError("runAllUpdate 超時", new Error("執行超過 5 分鐘，提前中止"), {step: step, elapsed: Date.now() - startTime});
-      Logger.log("⏰ " + step + " 階段超過 5 分鐘，提前中止");
-      return true;
-    }
-    return false;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    Logger.log("⚠️ runAllUpdate 取得鎖失敗，另有任務執行中，跳過");
+    return;
   }
-
-  initMembershipSheet();
-  if (checkTimeout("initMembershipSheet")) return;
-  if (refreshSession()) {
-    Logger.log("🚀 憑證已更新，開始完整抓取...");
-    if (checkTimeout("refreshSession")) return;
-    scrapeLandStableBatch_General();
-    if (checkTimeout("scrapeGeneral")) return;
-    if (typeof scrapeLandStableBatch_Buy === 'function') {
-      scrapeLandStableBatch_Buy();
-      if (checkTimeout("scrapeBuy")) return;
+  try {
+    const startTime = Date.now();
+    function checkTimeout(step) {
+      if (Date.now() - startTime > 5 * 60 * 1000) {
+        notifyError("runAllUpdate 超時", new Error("執行超過 5 分鐘，提前中止"), {step: step, elapsed: Date.now() - startTime});
+        Logger.log("⏰ " + step + " 階段超過 5 分鐘，提前中止");
+        return true;
+      }
+      return false;
     }
-    Logger.log("✨ 所有清單更新完成！");
-  } else {
-    notifyError("refreshSession 失敗", new Error("runAllUpdate 無法取得憑證"), {step: "runAllUpdate"});
+
+    initMembershipSheet();
+    if (checkTimeout("initMembershipSheet")) return;
+    if (refreshSession()) {
+      Logger.log("🚀 憑證已更新，開始完整抓取...");
+      if (checkTimeout("refreshSession")) return;
+      scrapeLandStableBatch_General();
+      if (checkTimeout("scrapeGeneral")) return;
+      if (typeof scrapeLandStableBatch_Buy === 'function') {
+        scrapeLandStableBatch_Buy();
+        if (checkTimeout("scrapeBuy")) return;
+      }
+      Logger.log("✨ 所有清單更新完成！");
+    } else {
+      notifyError("refreshSession 失敗", new Error("runAllUpdate 無法取得憑證"), {step: "runAllUpdate"});
+    }
+  } finally {
+    lock.releaseLock();
   }
 }
 

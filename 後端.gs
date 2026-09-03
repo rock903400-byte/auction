@@ -45,6 +45,18 @@ const CACHE_TTL = 5 * 60;
 function doGet(e) {
   const params = (e && e.parameter) ? e.parameter : {};
 
+  // ── 內部小圈：特權操作需 ADMIN_TOKEN（PropertiesService）────────────────
+  if (params.action || params.debug === '1') {
+    try {
+      var _adminToken = PropertiesService.getScriptProperties().getProperty('ADMIN_TOKEN') || '';
+    } catch (_err) { var _adminToken = ''; }
+    if (!_adminToken || params.token !== _adminToken) {
+      return ContentService
+        .createTextOutput(JSON.stringify({ error: 'forbidden' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
   // Debug mode
   if (params.debug === '1') {
     try {
@@ -106,12 +118,14 @@ function doGet(e) {
   const limit = role === 'pro' ? Infinity : (role === 'free' ? 10 : 3);
   return ContentService
     .createTextOutput(JSON.stringify({
-      version:   CONST_VERSION,
-      general:   allData.general.slice(0, limit),
-      special:   allData.special.slice(0, limit),
-      updatedAt: allData.updatedAt,
-      userEmail: email,
-      userRole:  role,
+      version:     CONST_VERSION,
+      general:     allData.general.slice(0, limit),
+      special:     allData.special.slice(0, limit),
+      totalGeneral: allData.general.length,
+      totalSpecial: allData.special.length,
+      updatedAt:   allData.updatedAt,
+      userEmail:   email,
+      userRole:    role,
     }))
     .setMimeType(ContentService.MimeType.JSON);
 }
@@ -173,12 +187,14 @@ function getSheetData() {
 
   const limit = role === 'pro' ? Infinity : (role === 'free' ? 10 : 3);
   return {
-    version:   CONST_VERSION,
-    general:   allData.general.slice(0, limit),
-    special:   allData.special.slice(0, limit),
-    updatedAt: allData.updatedAt,
-    userEmail: email,
-    userRole:  role,
+    version:      CONST_VERSION,
+    general:      allData.general.slice(0, limit),
+    special:      allData.special.slice(0, limit),
+    totalGeneral: allData.general.length,
+    totalSpecial: allData.special.length,
+    updatedAt:    allData.updatedAt,
+    userEmail:    email,
+    userRole:     role,
   };
 }
 
@@ -255,5 +271,5 @@ function safeString(val) {
 function safeNumber(val) {
   if (val == null || val === '') return 0;
   const n = parseFloat(val.toString().replace(/,/g, ''));
-  return isNaN(n) ? 0 : n;
+  return (!isFinite(n) || isNaN(n)) ? 0 : n;
 }

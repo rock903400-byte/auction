@@ -184,7 +184,7 @@
 
 <header>
   <div class="header-content">
-    <div class="brand">法拍補償 <span>PRO</span><span class="version-badge" id="version-badge">v1.0.0</span></div>
+    <div class="brand">法拍補償 <span>PRO</span><span class="version-badge" id="version-badge">v1.1.2</span></div>
     <div class="user-zone" id="user-zone">
       <div style="font-size:0.75rem; color:rgba(255,255,255,0.5)">載入中...</div>
     </div>
@@ -244,7 +244,7 @@
   // ── 版本號 ─────────────────────────────────────────────────────────────────
   var APP_VERSION = '1.1.2';
   // ── 請填入您部署的 GAS Web App URL ──────────────────────────────────────────
-  var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxmw_xJaLiO_fVCHaEeB_BFjqKPIA5vGeEfTyr58RP_1r2LJpqfcZSO0WGITCLKtaz3/exec';
+  var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzuAEEqJ6If-ytmZlaAEoeaz3fbjRO72iF6StfaeWENP7mR6RBVMg8fW8Vz3xjOTk-W/exec';
   // ────────────────────────────────────────────────────────────────────────────
 
   const PAGE_SIZE = 20;
@@ -255,8 +255,15 @@
   var userRole = 'visitor';
   var isRestricted = true;
   var userEmail = localStorage.getItem('auction_email') || '';
+  var _totalGeneral = 0;
+  var _totalSpecial = 0;
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+  function isSafeUrl(u){ return /^https:\/\//.test(String(u||'')); }
+  function getRoleLimit(r){ return r==='pro'?Infinity:(r==='free'?10:3); }
 
   window.onload = function() {
+    var _badge = document.getElementById('version-badge');
+    if(_badge) _badge.textContent = 'v' + APP_VERSION;
     if (!WEB_APP_URL) {
       showSetupNotice();
       return;
@@ -297,7 +304,7 @@
       .then(onDataLoaded)
       .catch(function(err) {
         document.getElementById('list').innerHTML =
-          '<div style="text-align:center; padding:2rem; color:var(--text-muted)">載入失敗：' + err.message + '<br><small>請確認 WEB_APP_URL 正確，且 GAS 已部署為「所有人可存取」</small></div>';
+          '<div style="text-align:center; padding:2rem; color:var(--text-muted)">載入失敗：' + esc(err.message) + '<br><small>請確認 WEB_APP_URL 正確，且 GAS 已部署為「所有人可存取」</small></div>';
         document.getElementById('result-count').innerHTML = '<i class="fa-solid fa-list-ul"></i> 載入失敗';
       });
   }
@@ -306,29 +313,37 @@
     if (!data || data.error) {
       document.getElementById('list').innerHTML =
         '<div style="text-align:center; padding:2rem; color:var(--text-muted)">無法載入資料' +
-        (data && data.error ? '：' + data.error : '') + '</div>';
+        (data && data.error ? '：' + esc(data.error) : '') + '</div>';
       return;
     }
 
     userRole = data.userRole || 'visitor';
     isRestricted = userRole !== 'pro';
+    _totalGeneral = Number(data.totalGeneral) || rawData.general.length || (data.general||[]).length;
+    _totalSpecial = Number(data.totalSpecial) || rawData.special.length || (data.special||[]).length;
 
     if (data.version && data.version !== APP_VERSION) {
-      document.getElementById('version-badge').innerHTML = 'v' + data.version;
+      var __badge = document.getElementById('version-badge');
+      if(__badge) __badge.textContent = 'v' + data.version;
       var toast = document.getElementById('toast');
-      toast.innerHTML = '<i class="fa-solid fa-circle-up"></i> 新版本 v' + data.version + ' 可用，請重整頁面';
+      toast.innerHTML = '<i class="fa-solid fa-circle-up"></i> 新版本 v' + esc(data.version) + ' 可用，請重整頁面';
       toast.style.opacity = 1;
       setTimeout(function() { toast.style.opacity = 0; }, 5000);
     }
 
     rawData.general = preprocess(data.general || []);
     rawData.special = preprocess(data.special || []);
+    // 若後端未回傳 total 則退回為已切片長度
+    if(!data.totalGeneral) _totalGeneral = rawData.general.length;
+    if(!data.totalSpecial) _totalSpecial = rawData.special.length;
 
       if (data.userEmail) {
+        var __emailEsc = esc(data.userEmail);
+        var __roleEsc = esc(userRole.toUpperCase());
         document.getElementById('user-zone').innerHTML =
           '<div style="text-align:right">' +
-            '<div style="font-size:0.7rem; font-weight:800; color:var(--accent)">' + userRole.toUpperCase() + ' 會員</div>' +
-            '<div style="font-size:0.6rem; color:rgba(255,255,255,0.7); max-width:160px; overflow:hidden; text-overflow:ellipsis">' + data.userEmail + '</div>' +
+            '<div style="font-size:0.7rem; font-weight:800; color:var(--accent)">' + __roleEsc + ' 會員</div>' +
+            '<div style="font-size:0.6rem; color:rgba(255,255,255,0.7); max-width:160px; overflow:hidden; text-overflow:ellipsis">' + __emailEsc + '</div>' +
           '</div>' +
           '<button class="btn-login" onclick="openLoginModal()" title="切換帳號"><i class="fa-solid fa-arrow-right-from-bracket"></i> 切換</button>';
       } else {
@@ -394,30 +409,30 @@
     } else {
       container.innerHTML = page.map(function(item) {
         var roiColor = item.roi >= 100 ? '#e11d48' : (item.roi >= 50 ? '#d97706' : '#64748b');
-        var addrSafe = (item.address || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        var safePdf = isSafeUrl(item.pdf_url) ? esc(item.pdf_url) : '';
         return '<div class="item">' +
           '<div class="card-top">' +
-            '<div class="county-tag">' + (item.county || '') + '</div>' +
+            '<div class="county-tag">' + esc(item.county) + '</div>' +
             '<div class="roi-badge">' +
-              '<span class="roi-num" style="color:' + roiColor + '">' + item.roi.toFixed(1) + '%</span>' +
+              '<span class="roi-num" style="color:' + roiColor + '">' + esc(item.roi.toFixed(1)) + '%</span>' +
               '<div class="roi-lbl" style="color:' + roiColor + '">ROI 報酬率</div>' +
             '</div>' +
           '</div>' +
-          '<div style="font-size:0.75rem; font-weight:700; color:var(--text-muted)">' + (item.court_name || '') + ' ' + (item.sale_type || '') + '</div>' +
-          '<div class="addr-area" onclick="copy(\'' + addrSafe + '\')">' +
-            '<div class="addr-main">' + (item.address || '') + '</div>' +
+          '<div style="font-size:0.75rem; font-weight:700; color:var(--text-muted)">' + esc(item.court_name) + ' ' + esc(item.sale_type) + '</div>' +
+          '<div class="addr-area" data-addr="' + esc(item.address) + '" onclick="copy(this.dataset.addr)">' +
+            '<div class="addr-main">' + esc(item.address) + '</div>' +
             '<div class="tags-row">' +
               '<span class="tag ' + (item.is_handover ? 'tag-handover' : 'tag-no-handover') + '">' + (item.is_handover ? '點交' : '不點交') + '</span>' +
               (item.is_empty_land ? '<span class="tag tag-empty">空地</span>' : '') +
-              '<span class="tag tag-date"><i class="fa-regular fa-calendar"></i> ' + (item.sale_date || '未定') + '</span>' +
+              '<span class="tag tag-date"><i class="fa-regular fa-calendar"></i> ' + esc(item.sale_date||'未定') + '</span>' +
             '</div>' +
-            '<div class="area-sub"><i class="fa-solid fa-ruler-combined"></i> ' + (item.area_display || '') + '</div>' +
+            '<div class="area-sub"><i class="fa-solid fa-ruler-combined"></i> ' + esc(item.area_display) + '</div>' +
           '</div>' +
           '<div class="price-grid">' +
-            '<div class="price-box"><div class="p-lbl">拍賣底價</div><div class="p-val" style="color:var(--danger)">$' + item.numPrice.toLocaleString() + '</div></div>' +
-            '<div class="price-box"><div class="p-lbl">預估補償金</div><div class="p-val" style="color:var(--accent)">$' + item.comp.toLocaleString() + '</div></div>' +
+            '<div class="price-box"><div class="p-lbl">拍賣底價</div><div class="p-val" style="color:var(--danger)">$' + esc(item.numPrice.toLocaleString()) + '</div></div>' +
+            '<div class="price-box"><div class="p-lbl">預估補償金</div><div class="p-val" style="color:var(--accent)">$' + esc(item.comp.toLocaleString()) + '</div></div>' +
           '</div>' +
-          (item.pdf_url ? '<a href="' + item.pdf_url + '" target="_blank" class="btn-pdf">查看官方公告 <i class="fa-solid fa-arrow-up-right-from-square"></i></a>' : '') +
+          (safePdf ? '<a href="' + safePdf + '" target="_blank" rel="noopener" class="btn-pdf">查看官方公告 <i class="fa-solid fa-arrow-up-right-from-square"></i></a>' : '') +
         '</div>';
       }).join('');
 
@@ -429,7 +444,9 @@
       }
     }
 
-    if (isRestricted && page.length > 0) {
+    var _curTotal = currentTab==='general' ? _totalGeneral : _totalSpecial;
+    var _limit = getRoleLimit(userRole);
+    if (isRestricted && page.length > 0 && _curTotal >= _limit) {
       var title = '發現更多高回報物件';
       var desc = '目前的 [訪客] 模式僅能預覽 3 筆案件。請輸入您的 Email 帳號以查看更多資料。';
       if (userRole === 'free') {
