@@ -107,6 +107,9 @@ function doGet(e) {
       };
       if (allData.general.length > 0 || allData.special.length > 0) {
         putChunkedCache(cache, CACHE_KEY, JSON.stringify(allData), CACHE_TTL);
+      } else if (typeof notifyError === 'function') {
+        // 零數據告警：防 121→6 類事故沉默（僅在非空快取穿透時觸發一次）
+        try { notifyError("Sheet 空數據", new Error("both lists empty"), {step:"doGet", cacheHit:false}); } catch (_e) {}
       }
     } catch (err) {
       return ContentService
@@ -178,6 +181,8 @@ function getSheetData() {
       };
       if (allData.general.length > 0 || allData.special.length > 0) {
         putChunkedCache(cache, CACHE_KEY, JSON.stringify(allData), CACHE_TTL);
+      } else if (typeof notifyError === 'function') {
+        try { notifyError("Sheet 空數據", new Error("both lists empty"), {step:"getSheetData", cacheHit:false}); } catch (_e) {}
       }
     } catch (e) {
       Logger.log('getSheetData 錯誤：' + e.message);
