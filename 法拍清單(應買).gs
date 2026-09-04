@@ -165,6 +165,10 @@ function scrapeLandStableBatch_Buy() {
         sheet.getRange(2, 22, allRows.length, 1).setNumberFormat("0.00");
         sheet.autoResizeColumns(1, 25);
         Logger.log("🎯 【應買】清單更新完畢！");
+        // Write-through：寫表成功立刻預熱快取，前端 doGet 直接命中、不必讀表
+        if (typeof warmCacheTab === 'function') {
+          try { warmCacheTab('special'); } catch (_e) { Logger.log("快取預熱略過: " + _e.message); }
+        }
       } else {
         notifyError("應買篩選後為0筆", new Error("filteredData empty"), {step: "scrapeBuy", raw: allFetchedData.length, filtered: filteredData.length});
       }

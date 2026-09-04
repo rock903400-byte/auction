@@ -266,6 +266,10 @@ function scrapeLandStableBatch_General() {
         sheet.getRange(2, 22, allRows.length, 1).setNumberFormat("0.00");
         sheet.autoResizeColumns(1, 25);
         Logger.log("🎯 【一般】清單更新完畢！");
+        // Write-through：寫表成功立刻預熱快取，前端 doGet 直接命中、不必讀表
+        if (typeof warmCacheTab === 'function') {
+          try { warmCacheTab('general'); } catch (_e) { Logger.log("快取預熱略過: " + _e.message); }
+        }
       } else {
         notifyError("一般篩選後為0筆", new Error("filteredData empty"), {step: "scrapeGeneral", raw: allFetchedData.length, filtered: filteredData.length});
       }
@@ -340,6 +344,10 @@ function runAllUpdate() {
       if (typeof scrapeLandStableBatch_Buy === 'function') {
         scrapeLandStableBatch_Buy();
         if (checkTimeout("scrapeBuy")) return;
+      }
+      // 收尾：統一預熱快取（各爬蟲已預熱各自頁籤，此處確保 updatedAt 一致）
+      if (typeof warmCache === 'function') {
+        try { warmCache(); } catch (_e) { Logger.log("快取預熱略過: " + _e.message); }
       }
       Logger.log("✨ 所有清單更新完成！");
     } else {

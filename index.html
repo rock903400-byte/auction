@@ -242,9 +242,9 @@
 
 <script>
   // ── 版本號 ─────────────────────────────────────────────────────────────────
-  var APP_VERSION = '1.1.2';
+  var APP_VERSION = '1.1.3';
   // ── 請填入您部署的 GAS Web App URL ──────────────────────────────────────────
-  var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyk4DnvWZ8nOvIfTntsdvbaUZitSv7A0lJEGDBkvXNnIoUNBJtP7kj10cjfRG8XPvtx/exec';
+  var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxcOHbVQBxtW68J5T6QRDK86edtajiAPv6p9f4t4VCaVRZHjvJ54t2yNcOOdTyAysew/exec';
   // ────────────────────────────────────────────────────────────────────────────
 
   const PAGE_SIZE = 20;
@@ -257,6 +257,9 @@
   var userEmail = localStorage.getItem('auction_email') || '';
   var _totalGeneral = 0;
   var _totalSpecial = 0;
+  // 分頁籤按需載入：首屏只抓 general，special 等切換時再抓（後端 ?tab= 參數）
+  var _loadedTabs = { general: false, special: false };
+  var _loadingTab = null;
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
   function isSafeUrl(u){ return /^https:\/\//.test(String(u||'')); }
   function getRoleLimit(r){ return r==='pro'?Infinity:(r==='free'?10:3); }
@@ -269,7 +272,7 @@
       return;
     }
     renderSkeleton();
-    loadData();
+    loadData('general'); // 首屏只抓 general，special 切頁時再抓
   };
 
   function showSetupNotice() {
@@ -294,22 +297,35 @@
     ).join('');
   }
 
-  function loadData() {
-    var url = WEB_APP_URL + (userEmail ? '?email=' + encodeURIComponent(userEmail) : '');
-    fetch(url)
+  function buildApiUrl(tab) {
+    var url = WEB_APP_URL + '?tab=' + tab;
+    if (userEmail) url += '&email=' + encodeURIComponent(userEmail);
+    return url;
+  }
+
+  function loadData(tab) {
+    tab = tab || currentTab;
+    if (_loadingTab) return; // 避免切換分頁時的併發重複請求
+    _loadingTab = tab;
+    fetch(buildApiUrl(tab))
       .then(function(res) {
         if (!res.ok) throw new Error('HTTP ' + res.status);
         return res.json();
       })
-      .then(onDataLoaded)
+      .then(function(data) {
+        _loadingTab = null;
+        onDataLoaded(data, tab);
+      })
       .catch(function(err) {
+        _loadingTab = null;
+        if (tab !== currentTab) return; // 背景分頁失敗不打擾當前畫面
         document.getElementById('list').innerHTML =
           '<div style="text-align:center; padding:2rem; color:var(--text-muted)">載入失敗：' + esc(err.message) + '<br><small>請確認 WEB_APP_URL 正確，且 GAS 已部署為「所有人可存取」</small></div>';
         document.getElementById('result-count').innerHTML = '<i class="fa-solid fa-list-ul"></i> 載入失敗';
       });
   }
 
-  function onDataLoaded(data) {
+  function onDataLoaded(data, tab) {
     if (!data || data.error) {
       document.getElementById('list').innerHTML =
         '<div style="text-align:center; padding:2rem; color:var(--text-muted)">無法載入資料' +
@@ -319,8 +335,8 @@
 
     userRole = data.userRole || 'visitor';
     isRestricted = userRole !== 'pro';
-    _totalGeneral = Number(data.totalGeneral) || rawData.general.length || (data.general||[]).length;
-    _totalSpecial = Number(data.totalSpecial) || rawData.special.length || (data.special||[]).length;
+    _totalGeneral = Number(data.totalGeneral) || _totalGeneral || (data.general||[]).length;
+    _totalSpecial = Number(data.totalSpecial) || _totalSpecial || (data.special||[]).length;
 
     if (data.version && data.version !== APP_VERSION) {
       var __badge = document.getElementById('version-badge');
@@ -331,31 +347,44 @@
       setTimeout(function() { toast.style.opacity = 0; }, 5000);
     }
 
-    rawData.general = preprocess(data.general || []);
-    rawData.special = preprocess(data.special || []);
-    // 若後端未回傳 total 則退回為已切片長度
-    if(!data.totalGeneral) _totalGeneral = rawData.general.length;
-    if(!data.totalSpecial) _totalSpecial = rawData.special.length;
-
-      if (data.userEmail) {
-        var __emailEsc = esc(data.userEmail);
-        var __roleEsc = esc(userRole.toUpperCase());
-        document.getElementById('user-zone').innerHTML =
-          '<div style="text-align:right">' +
-            '<div style="font-size:0.7rem; font-weight:800; color:var(--accent)">' + __roleEsc + ' 會員</div>' +
-            '<div style="font-size:0.6rem; color:rgba(255,255,255,0.7); max-width:160px; overflow:hidden; text-overflow:ellipsis">' + __emailEsc + '</div>' +
-          '</div>' +
-          '<button class="btn-login" onclick="openLoginModal()" title="切換帳號"><i class="fa-solid fa-arrow-right-from-bracket"></i> 切換</button>';
-      } else {
-        document.getElementById('user-zone').innerHTML =
-          '<button class="btn-login" onclick="openLoginModal()"><i class="fa-solid fa-user"></i> 登入 / 訪客</button>';
+    // 只存入本次請求的分頁（後端 tab 回傳另一邊為空陣列，不可覆蓋已載入資料）；
+    // 相容無 tab 參數的舊後端：一次回兩個就照單全收
+    if (tab === 'special') {
+      rawData.special = preprocess(data.special || []);
+      _loadedTabs.special = true;
+    } else {
+      rawData.general = preprocess(data.general || []);
+      _loadedTabs.general = true;
+      if (data.special && data.special.length && !_loadedTabs.special) {
+        rawData.special = preprocess(data.special);
+        _loadedTabs.special = true;
       }
+    }
 
-    document.getElementById('t-gen').querySelector('.count-badge').innerText = rawData.general.length;
-    document.getElementById('t-buy').querySelector('.count-badge').innerText = rawData.special.length;
+    updateBadges();
 
+    if (data.userEmail) {
+      var __emailEsc = esc(data.userEmail);
+      var __roleEsc = esc(userRole.toUpperCase());
+      document.getElementById('user-zone').innerHTML =
+        '<div style="text-align:right">' +
+          '<div style="font-size:0.7rem; font-weight:800; color:var(--accent)">' + __roleEsc + ' 會員</div>' +
+          '<div style="font-size:0.6rem; color:rgba(255,255,255,0.7); max-width:160px; overflow:hidden; text-overflow:ellipsis">' + __emailEsc + '</div>' +
+        '</div>' +
+        '<button class="btn-login" onclick="openLoginModal()" title="切換帳號"><i class="fa-solid fa-arrow-right-from-bracket"></i> 切換</button>';
+    } else {
+      document.getElementById('user-zone').innerHTML =
+        '<button class="btn-login" onclick="openLoginModal()"><i class="fa-solid fa-user"></i> 登入 / 訪客</button>';
+    }
+
+    if (tab !== currentTab) return; // 使用者已切走：數字已更新，不重繪當前畫面
     initCounty();
     render();
+  }
+
+  function updateBadges() {
+    document.getElementById('t-gen').querySelector('.count-badge').innerText = _totalGeneral;
+    document.getElementById('t-buy').querySelector('.count-badge').innerText = _totalSpecial;
   }
 
   function preprocess(arr) {
@@ -476,6 +505,12 @@
     currentTab = t;
     document.getElementById('t-gen').classList.toggle('active', t === 'general');
     document.getElementById('t-buy').classList.toggle('active', t === 'special');
+    if (!_loadedTabs[t]) {
+      renderSkeleton();
+      document.getElementById('result-count').innerHTML = '<i class="fa-solid fa-list-ul"></i> 載入中…';
+      loadData(t);
+      return;
+    }
     initCounty();
     render();
   }
@@ -516,7 +551,8 @@
     }
     closeLoginModal();
     renderSkeleton();
-    loadData();
+    _loadedTabs = { general: false, special: false }; // 換帳號權限不同，全部重抓
+    loadData(currentTab);
   }
 
   document.getElementById('login-email').addEventListener('keydown', function(e) {

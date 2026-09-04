@@ -38,8 +38,14 @@ const SHEET_NAMES = {
   MEMBERS: "會員名單",
 };
 
-const CACHE_KEY = "auction_data_v3";
-const CACHE_TTL = 5 * 60;
+const CACHE_KEY = "auction_data_v3"; // 舊版合併快取（僅清快取時相容用）
+const CACHE_KEY_GENERAL = "auction_data_general_v1";
+const CACHE_KEY_SPECIAL = "auction_data_special_v1";
+// 一天只爬一次，快取拉到 CacheService 上限 6 小時；爬蟲寫表後會主動預熱（write-through），
+// 平時 doGet 幾乎不碰試算表
+const CACHE_TTL = 6 * 60 * 60;
+const ROLE_CACHE_PREFIX = "role_v1_";
+const ROLE_CACHE_TTL = 30 * 60; // 會員權限 30 分鐘快取（改權限最多延遲 30 分鐘生效）
 
 // ─── 入口點（JSON API，供 GitHub Pages 前端跨網域呼叫）────────────────────────
 function doGet(e) {
@@ -86,44 +92,41 @@ function doGet(e) {
     try { scrapeLandStableBatch_Buy(); return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON); }
     catch (err) { return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message })).setMimeType(ContentService.MimeType.JSON); }
   }
+  if (params.action === 'warmCache') {
+    try {
+      var warmed = warmCache();
+      return ContentService.createTextOutput(JSON.stringify({ ok: true, general: warmed.general.length, special: warmed.special.length })).setMimeType(ContentService.MimeType.JSON);
+    }
+    catch (err) { return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message })).setMimeType(ContentService.MimeType.JSON); }
+  }
+  if (params.action === 'clearCache') {
+    try { clearCache(); return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON); }
+    catch (err) { return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message })).setMimeType(ContentService.MimeType.JSON); }
+  }
 
   const email = params.email ? params.email.trim() : '';
   const role = email ? checkUserRole(email) : 'visitor';
 
-  const cache = CacheService.getScriptCache();
+  // tab=all（預設，相容舊前端）| general | special：只回傳該分頁陣列，total 兩個都給（前端 badge 用）
+  const tab = params.tab ? params.tab.toString().toLowerCase() : 'all';
+  const wantGeneral = tab !== 'special';
+  const wantSpecial = tab !== 'general';
+
   let allData = null;
   try {
-    const cached = getChunkedCache(cache, CACHE_KEY);
-    if (cached) allData = JSON.parse(cached);
-  } catch (err) { allData = null; }
-
-  if (!allData) {
-    try {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      allData = {
-        general:   extractData(ss.getSheetByName(SHEET_NAMES.GENERAL)),
-        special:   extractData(ss.getSheetByName(SHEET_NAMES.SPECIAL)),
-        updatedAt: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
-      };
-      if (allData.general.length > 0 || allData.special.length > 0) {
-        putChunkedCache(cache, CACHE_KEY, JSON.stringify(allData), CACHE_TTL);
-      } else if (typeof notifyError === 'function') {
-        // 零數據告警：防 121→6 類事故沉默（僅在非空快取穿透時觸發一次）
-        try { notifyError("Sheet 空數據", new Error("both lists empty"), {step:"doGet", cacheHit:false}); } catch (_e) {}
-      }
-    } catch (err) {
-      return ContentService
-        .createTextOutput(JSON.stringify({ error: err.message }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
+    allData = getLists();
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: err.message }))
+      .setMimeType(ContentService.MimeType.JSON);
   }
 
   const limit = role === 'pro' ? Infinity : (role === 'free' ? 10 : 3);
   return ContentService
     .createTextOutput(JSON.stringify({
       version:     CONST_VERSION,
-      general:     allData.general.slice(0, limit),
-      special:     allData.special.slice(0, limit),
+      general:     wantGeneral ? allData.general.slice(0, limit) : [],
+      special:     wantSpecial ? allData.special.slice(0, limit) : [],
       totalGeneral: allData.general.length,
       totalSpecial: allData.special.length,
       updatedAt:   allData.updatedAt,
@@ -133,16 +136,32 @@ function doGet(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// ─── 查詢會員權限 ──────────────────────────────────────────────────────────────
+// ─── 查詢會員權限（含 30 分鐘快取，避免每次請求都讀表）───────────────────────
 function checkUserRole(email) {
   if (!email) return 'visitor';
+  const norm = email.toString().trim().toLowerCase();
+  if (!norm) return 'visitor';
+  const key = ROLE_CACHE_PREFIX + norm;
+  let cache = null;
+  try {
+    cache = CacheService.getScriptCache();
+    const hit = cache.get(key);
+    if (hit) return hit;
+  } catch (e) { cache = null; }
+  const role = lookupUserRole(norm);
+  try { if (cache) cache.put(key, role, ROLE_CACHE_TTL); } catch (e) {}
+  return role;
+}
+
+// ─── 會員權限實際查表（僅快取未命中時呼叫）────────────────────────────────────
+function lookupUserRole(normEmail) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const memberSheet = ss.getSheetByName(SHEET_NAMES.MEMBERS);
     if (!memberSheet || memberSheet.getLastRow() < 2) return 'visitor';
     const data = memberSheet.getRange(2, 1, memberSheet.getLastRow() - 1, 2).getValues();
     for (const row of data) {
-      if (row[0].toString().trim().toLowerCase() === email.toLowerCase()) {
+      if (row[0].toString().trim().toLowerCase() === normEmail) {
         return row[1].toString().trim().toLowerCase() || 'free';
       }
     }
@@ -167,27 +186,11 @@ function getSheetData() {
   let allData = null;
 
   try {
-    const cached = getChunkedCache(cache, CACHE_KEY);
-    if (cached) allData = JSON.parse(cached);
+    allData = getLists();
   } catch (e) { allData = null; }
 
   if (!allData) {
-    try {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      allData = {
-        general:   extractData(ss.getSheetByName(SHEET_NAMES.GENERAL)),
-        special:   extractData(ss.getSheetByName(SHEET_NAMES.SPECIAL)),
-        updatedAt: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
-      };
-      if (allData.general.length > 0 || allData.special.length > 0) {
-        putChunkedCache(cache, CACHE_KEY, JSON.stringify(allData), CACHE_TTL);
-      } else if (typeof notifyError === 'function') {
-        try { notifyError("Sheet 空數據", new Error("both lists empty"), {step:"getSheetData", cacheHit:false}); } catch (_e) {}
-      }
-    } catch (e) {
-      Logger.log('getSheetData 錯誤：' + e.message);
-      return { general: [], special: [], updatedAt: null, error: e.message, userEmail: email, userRole: role };
-    }
+    return { general: [], special: [], updatedAt: null, error: '讀取資料失敗', userEmail: email, userRole: role };
   }
 
   const limit = role === 'pro' ? Infinity : (role === 'free' ? 10 : 3);
@@ -203,10 +206,105 @@ function getSheetData() {
   };
 }
 
-// ─── 強制清除快取 ──────────────────────────────────────────────────────────────
+// ─── 強制清除快取（含舊版合併快取鍵，相容用）──────────────────────────────────
 function clearCache() {
-  CacheService.getScriptCache().remove(CACHE_KEY);
+  const cache = CacheService.getScriptCache();
+  removeChunkedCache(cache, CACHE_KEY_GENERAL);
+  removeChunkedCache(cache, CACHE_KEY_SPECIAL);
+  removeChunkedCache(cache, CACHE_KEY);
   Logger.log('快取已清除');
+}
+
+// ─── 分拆快取讀寫層（general / special 各一組，避免互相拖累）──────────────────
+function cacheKeyForList(name) {
+  return name === 'special' ? CACHE_KEY_SPECIAL : CACHE_KEY_GENERAL;
+}
+
+function getCachedList(name) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const raw = getChunkedCache(cache, cacheKeyForList(name));
+    if (raw) return JSON.parse(raw); // { items, updatedAt }
+  } catch (e) {}
+  return null;
+}
+
+function putCachedList(name, items, updatedAt) {
+  try {
+    const cache = CacheService.getScriptCache();
+    putChunkedCache(cache, cacheKeyForList(name), JSON.stringify({ items: items, updatedAt: updatedAt }), CACHE_TTL);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// 僅在快取未命中時讀表（doGet 熱路徑平時不碰試算表）
+function readSheetLists() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const updatedAt = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+  return {
+    general:   extractData(ss.getSheetByName(SHEET_NAMES.GENERAL)),
+    special:   extractData(ss.getSheetByName(SHEET_NAMES.SPECIAL)),
+    updatedAt: updatedAt,
+  };
+}
+
+// 讀快取優先，miss 才讀表並回填；讀表失敗時有什麼吃什麼（部分快取降級）
+function getLists() {
+  const g = getCachedList('general');
+  const s = getCachedList('special');
+  if (g && s) {
+    return { general: g.items, special: s.items, updatedAt: g.updatedAt, cacheHit: true };
+  }
+  let fresh = null;
+  try {
+    fresh = readSheetLists();
+  } catch (err) {
+    if (g || s) {
+      return {
+        general: g ? g.items : [], special: s ? s.items : [],
+        updatedAt: (g || s).updatedAt, cacheHit: true, partial: true,
+      };
+    }
+    throw err;
+  }
+  if (fresh.general.length > 0 || fresh.special.length > 0) {
+    if (fresh.general.length > 0) putCachedList('general', fresh.general, fresh.updatedAt);
+    if (fresh.special.length > 0) putCachedList('special', fresh.special, fresh.updatedAt);
+  } else if (typeof notifyError === 'function') {
+    // 零數據告警：防 121→6 類事故沉默（僅在非空快取穿透時觸發一次）
+    try { notifyError("Sheet 空數據", new Error("both lists empty"), {step:"getLists", cacheHit:false}); } catch (_e) {}
+  }
+  return {
+    // 空讀表不覆蓋舊快取，避免爬蟲中途清空時前端被洗白
+    general: fresh.general.length > 0 ? fresh.general : (g ? g.items : []),
+    special: fresh.special.length > 0 ? fresh.special : (s ? s.items : []),
+    updatedAt: fresh.updatedAt,
+    cacheHit: false,
+  };
+}
+
+// ─── Write-through：爬蟲寫表成功後主動預熱，doGet 直接命中 ────────────────────
+function warmCache() {
+  const fresh = readSheetLists();
+  if (fresh.general.length > 0) putCachedList('general', fresh.general, fresh.updatedAt);
+  if (fresh.special.length > 0) putCachedList('special', fresh.special, fresh.updatedAt);
+  Logger.log('快取已預熱 general=' + fresh.general.length + ' special=' + fresh.special.length);
+  return fresh;
+}
+
+// 單表預熱（爬蟲各自呼叫：general → 'general'，應買 → 'special'）
+function warmCacheTab(name) {
+  const listName = name === 'special' ? 'special' : 'general';
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetName = listName === 'special' ? SHEET_NAMES.SPECIAL : SHEET_NAMES.GENERAL;
+  const items = extractData(ss.getSheetByName(sheetName));
+  if (items.length > 0) {
+    putCachedList(listName, items, new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }));
+  }
+  Logger.log('快取已預熱(' + listName + ')=' + items.length);
+  return items.length;
 }
 
 // ─── 解析單一工作表資料 ────────────────────────────────────────────────────────
@@ -266,6 +364,18 @@ function getChunkedCache(cache, key) {
   const parts = keys.map(k => values[k]);
   if (parts.some(p => p == null)) return null;
   return parts.join('');
+}
+
+function removeChunkedCache(cache, key) {
+  try {
+    const meta = cache.get(key + '_meta');
+    const count = meta ? parseInt(meta, 10) : 0;
+    const keys = [key + '_meta'];
+    for (let i = 0; i < count; i++) keys.push(key + '_c' + i);
+    cache.removeAll(keys);
+  } catch (e) {
+    try { cache.remove(key + '_meta'); } catch (_e) {}
+  }
 }
 
 // ─── 工具函式 ──────────────────────────────────────────────────────────────────
