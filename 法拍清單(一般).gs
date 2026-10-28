@@ -35,31 +35,43 @@ function refreshSession() {
       "muteHttpExceptions": true
     };
 
-    const response = UrlFetchApp.fetch(url, options);
-    const content = response.getContentText();
-    const headers = response.getAllHeaders();
-
-    // 2. 獲取 Cookie (處理 Set-Cookie 陣列或字串)
+    let csrf = "";
+    let token = "";
     let cookie = "";
-    const setCookie = headers["Set-Cookie"];
-    if (setCookie) {
-      if (Array.isArray(setCookie)) {
-        cookie = setCookie.map(c => c.split(';')[0]).join('; ');
-      } else {
-        cookie = setCookie.split(';')[0];
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const response = fetchWithRetry(url, options, 3);
+      const content = response.getContentText();
+      const headers = response.getAllHeaders();
+
+      // 2. 獲取 Cookie (處理 Set-Cookie 陣列或字串)
+      cookie = "";
+      const setCookie = headers["Set-Cookie"];
+      if (setCookie) {
+        if (Array.isArray(setCookie)) {
+          cookie = setCookie.map(c => c.split(';')[0]).join('; ');
+        } else {
+          cookie = setCookie.split(';')[0];
+        }
+      }
+
+      // 3. 獲取 CSRF Token
+      // <input type="hidden" name="_csrf" value="xxxx-xxxx-xxxx" />
+      const csrfMatch = content.match(/name="_csrf"\s+value="([^"]+)"/);
+      csrf = csrfMatch ? csrfMatch[1] : "";
+
+      // 4. 獲取 Token (通常在 JavaScript 變數中)
+      // var token = 'xxxxxx'; 或 similar
+      const tokenMatch = content.match(/var\s+token\s*=\s*['"]([^'"]+)['"]/i) || 
+                         content.match(/name="token"\s+value="([^"]+)"/);
+      token = tokenMatch ? tokenMatch[1] : "";
+
+      if (csrf && token) break;
+      if (attempt < 3) {
+        Logger.log("⚠️ 第 " + attempt + " 次未能解析出 CSRF/Token，等待重試...");
+        Utilities.sleep(2000 * attempt);
       }
     }
-
-    // 3. 獲取 CSRF Token
-    // <input type="hidden" name="_csrf" value="xxxx-xxxx-xxxx" />
-    const csrfMatch = content.match(/name="_csrf"\s+value="([^"]+)"/);
-    const csrf = csrfMatch ? csrfMatch[1] : "";
-
-    // 4. 獲取 Token (通常在 JavaScript 變數中)
-    // var token = 'xxxxxx'; 或 similar
-    const tokenMatch = content.match(/var\s+token\s*=\s*['"]([^'"]+)['"]/i) || 
-                       content.match(/name="token"\s+value="([^"]+)"/);
-    const token = tokenMatch ? tokenMatch[1] : "";
 
     if (csrf && token) {
       configSheet.getRange("B1").setValue(cookie || configSheet.getRange("B1").getValue()); // 如果沒抓到新 Cookie 則保留舊的
@@ -72,6 +84,7 @@ function refreshSession() {
       return true;
     } else {
       Logger.log("❌ 無法解析憑證。可能是頁面結構改變或被阻擋。");
+      notifyError("Session 更新失敗", new Error("無法解析憑證 (CSRF/Token 為空)"), {step: "refreshSession"});
       return false;
     }
 
@@ -167,7 +180,7 @@ function scrapeLandStableBatch_General() {
         "muteHttpExceptions": true
       };
 
-      const response = UrlFetchApp.fetch(url, options);
+      const response = fetchWithRetry(url, options, 3);
       const content = response.getContentText();
       const json = JSON.parse(content);
 
@@ -351,7 +364,8 @@ function runAllUpdate() {
       }
       Logger.log("✨ 所有清單更新完成！");
     } else {
-      notifyError("refreshSession 失敗", new Error("runAllUpdate 無法取得憑證"), {step: "runAllUpdate"});
+      // refreshSession 內部已發送「Session 更新失敗」通知，此處不再重複告警
+      Logger.log("❌ runAllUpdate 因無法取得憑證而中止");
     }
   } finally {
     lock.releaseLock();
@@ -384,7 +398,7 @@ function debugFilterCounts(saletypeOverride) {
         sorted_column: "A.CRMYY, A.CRMID, A.CRMNO, A.SALENO, A.ROWID",
         sorted_type: "ASC", is_search: "Y"
       };
-      var response = UrlFetchApp.fetch(url, {
+      var response = fetchWithRetry(url, {
         muteHttpExceptions: true,
         method: "post",
         headers: {
@@ -394,7 +408,7 @@ function debugFilterCounts(saletypeOverride) {
           "X-Requested-With": "XMLHttpRequest"
         },
         payload: payload
-      });
+      }, 3);
       var content = response.getContentText();
       var json = JSON.parse(content);
       if (json && json.data) {

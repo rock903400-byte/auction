@@ -15,7 +15,7 @@ import requests
 
 WEB_APP_URL = os.getenv(
     "WEB_APP_URL",
-    "https://script.google.com/macros/s/AKfycbyk4DnvWZ8nOvIfTntsdvbaUZitSv7A0lJEGDBkvXNnIoUNBJtP7kj10cjfRG8XPvtx/exec",
+    "https://script.google.com/macros/s/AKfycbz8lDXJsyjAvuhDTW_heIkNI6vGnFUAk9gB-4sVkcD499ObQDslO1mMoe8CljI_CXJv/exec",
 )
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "02kEjSmOSw3lbG5Ee89zzpV6yHX_VhTv")
 FREE_EMAIL = os.getenv("FREE_EMAIL", "")
@@ -44,7 +44,7 @@ def test_visitor_no_email():
     assert j["userRole"] == "visitor"
     assert len(j["general"]) <= 3, f"visitor 應 <=3 筆，實得 {len(j['general'])}"
     assert j["totalGeneral"] >= len(j["general"])
-    assert j["version"] == "1.1.2"
+    assert j["version"] == "1.1.4"
     assert j["totalGeneral"] > 0 and j["totalSpecial"] > 0
 
 

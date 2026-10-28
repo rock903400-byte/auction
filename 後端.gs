@@ -92,6 +92,10 @@ function doGet(e) {
     try { scrapeLandStableBatch_Buy(); return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON); }
     catch (err) { return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message })).setMimeType(ContentService.MimeType.JSON); }
   }
+  if (params.action === 'runAllUpdate') {
+    try { runAllUpdate(); return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON); }
+    catch (err) { return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message })).setMimeType(ContentService.MimeType.JSON); }
+  }
   if (params.action === 'warmCache') {
     try {
       var warmed = warmCache();

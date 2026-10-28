@@ -84,7 +84,7 @@ function scrapeLandStableBatch_Buy() {
         "muteHttpExceptions": true
       };
 
-      const response = UrlFetchApp.fetch(url, options);
+      const response = fetchWithRetry(url, options, 3);
       const content = response.getContentText();
       const json = JSON.parse(content);
 
