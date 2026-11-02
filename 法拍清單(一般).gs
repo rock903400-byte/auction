@@ -353,9 +353,25 @@ function runAllUpdate(force) {
     return;
   }
   try {
-    // Relay 模式：司法院自 2026-10-29 起阻擋 GAS 出口 IP（Address unavailable），
-    // 改由外部 relay_scrape.py 抓取後 doPost(action=ingest) 送入。
-    // relay 近期已成功 → GAS 不再自抓；relay 停擺 → GAS 自抓，失敗即告警（看門狗）。
+    // 主路徑：司法院自 2026-10-29 起擋所有境外 IP，GAS（Google 美國機房）連不上。
+    // 已設定台灣機房代抓 → 由它抓原始資料，GAS 照舊篩選寫表；失敗只寄一封、保留既有資料。
+    if (isTaiwanRelayConfigured_()) {
+      try {
+        const data = fetchViaTaiwanRelay_();
+        const r = ingestRaw_(data.general, data.buy);
+        if (r.ok) {
+          Logger.log("✨ 台灣代理更新完成：一般 " + r.written.general + "、應買 " + r.written.buy);
+        } else {
+          notifyError("台灣代理資料不完整", new Error("一般或應買寫入 0 筆，已保留既有資料"),
+            { step: "taiwanRelay", raw: r.raw, written: r.written });
+        }
+      } catch (e) {
+        notifyError("台灣代理抓取失敗", e, { step: "taiwanRelay", relayLastIngest: relayIngestLabel_() });
+      }
+      return;
+    }
+
+    // 舊路徑（未設定台灣代理）：relay 近期已成功 → 跳過；否則 GAS 自抓，失敗即告警。
     // 注意：時間觸發器會傳入 event 物件，故只認 force === true。
     if (force !== true) {
       const ageH = relayIngestAgeHours_();

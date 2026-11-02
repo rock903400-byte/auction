@@ -1,6 +1,8 @@
 // ─── 共用常數 ──────────────────────────────────────────
 var CONST_KEYWORDS = "大同鄉 南澳鄉 員山鄉 烏來區 復興區 尖石鄉 五峰鄉 橫山鄉 關西鎮 泰安鄉 南庄鄉 獅潭鄉 和平區 仁愛鄉 信義鄉 魚池鄉 水里鄉 阿里山鄉 桃源區 那瑪夏區 茂林區 六龜區 獅子鄉 三地門鄉 牡丹鄉 來義鄉 泰武鄉 瑪家鄉 春日鄉 霧臺鄉 滿州鄉 車城鄉 內埔鄉 新埤鄉 秀林鄉 卓溪鄉 萬榮鄉 壽豐鄉 光復鄉 富里鄉 豐濱鄉 吉安鄉 鳳林鎮 玉里鎮 瑞穗鄉 花蓮市 新城鄉";
-var CONST_VERSION = "1.1.5";
+var CONST_VERSION = "1.1.6";
+// 前端 Google 登入用 OAuth Client ID（公開值，非密鑰）。空字串 = 尚未設定，所有人都是訪客。
+var GOOGLE_CLIENT_ID = "743693957557-61r5v4tno7fej7lvgdbphq5jd7ghbgon.apps.googleusercontent.com";
 
 // ─── 具備指數退避重試的 UrlFetch 工具函式 ──────────────────────────
 function fetchWithRetry(url, options, maxAttempts) {
@@ -27,9 +29,61 @@ function fetchWithRetry(url, options, maxAttempts) {
   throw lastErr || new Error("fetchWithRetry 失敗: " + url);
 }
 
+// ─── 台灣機房代抓（Cloud Run functions, asia-east1）──────────────────
+// 司法院擋所有境外 IP；GAS 在 Google 美國機房執行，連不上。
+// runAllUpdate（時間觸發器）→ 本函式呼叫私有的台灣機房函式，雙重驗證：
+//   1) Authorization: GAS 身分 ID token（Cloud Run IAM，需 appsscript.json 的 openid scope）
+//   2) X-Relay-Secret: 共用密鑰
+// 設定存在 ScriptProperties：RELAY_PROXY_URL / RELAY_PROXY_SECRET（由 doPost setRelayProxy 寫入）
+function isTaiwanRelayConfigured_() {
+  var p = PropertiesService.getScriptProperties();
+  return !!(p.getProperty("RELAY_PROXY_URL") && p.getProperty("RELAY_PROXY_SECRET"));
+}
+
+function fetchViaTaiwanRelay_() {
+  var p = PropertiesService.getScriptProperties();
+  var url = p.getProperty("RELAY_PROXY_URL");
+  var secret = p.getProperty("RELAY_PROXY_SECRET");
+  if (!url || !secret) throw new Error("台灣代理尚未設定（RELAY_PROXY_URL / RELAY_PROXY_SECRET）");
+  var res = fetchWithRetry(url, {
+    method: "post",
+    contentType: "application/json; charset=utf-8",
+    payload: JSON.stringify({ keyword: CONST_KEYWORDS }),
+    headers: {
+      "Authorization": "Bearer " + ScriptApp.getIdentityToken(),
+      "X-Relay-Secret": secret
+    },
+    muteHttpExceptions: true
+  }, 3);
+  var code = res.getResponseCode();
+  var text = res.getContentText();
+  var js = null;
+  try { js = JSON.parse(text); } catch (_e) { js = null; }
+  if (code !== 200 || !js || !js.ok) {
+    throw new Error("台灣代理回應 HTTP " + code + "：" + String((js && js.error) || text).slice(0, 300));
+  }
+  return js;
+}
+
+function decodeJwtPayload_(jwt) {
+  var part = String(jwt || "").split(".")[1] || "";
+  while (part.length % 4) part += "=";
+  return JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(part)).getDataAsString());
+}
+
+/**
+ * 一次性：在 GAS 編輯器手動執行，授權新增的 openid 權限，
+ * 並記下 GAS 身分 token 的 audience（Cloud Run 需設為 custom audience 才會接受）。
+ */
+function authorizeRelay() {
+  var payload = decodeJwtPayload_(ScriptApp.getIdentityToken());
+  PropertiesService.getScriptProperties().setProperty("RELAY_ID_AUD", String(payload.aud || ""));
+  Logger.log("✅ 授權完成。aud=" + payload.aud + " email=" + payload.email);
+}
+
 // ─── Relay（外部抓取）狀態 ──────────────────────────────────────
-// 司法院阻擋 GAS 出口 IP（GitHub Actions 也被擋），資料改由本機 relay_scrape.py 送入 doPost(action=ingest)
-// 74h：本機週末關機（週五 08:30 → 週一 09:45 ≈ 73.3h）不誤報；relay 真的失敗會即時 report
+// LAST_INGEST_AT：最後一次成功寫入（台灣代理或手動 relay_scrape.py 皆會更新）
+// 未設定台灣代理時的舊路徑：relay 74 小時內成功過就跳過自抓
 var RELAY_FRESH_HOURS = 74;
 
 function relayIngestAgeHours_() {

@@ -184,7 +184,7 @@
 
 <header>
   <div class="header-content">
-    <div class="brand">法拍補償 <span>PRO</span><span class="version-badge" id="version-badge">v1.1.5</span></div>
+    <div class="brand">法拍補償 <span>PRO</span><span class="version-badge" id="version-badge">v1.1.6</span></div>
     <div class="user-zone" id="user-zone">
       <div style="font-size:0.75rem; color:rgba(255,255,255,0.5)">載入中...</div>
     </div>
@@ -193,11 +193,12 @@
 
 <div id="login-modal" class="modal-overlay" style="display:none">
   <div class="modal-box">
-    <h3><i class="fa-solid fa-user-circle" style="color:var(--accent)"></i> 輸入您的 Email</h3>
-    <p>請輸入您的 Google Email，系統將根據您的帳號顯示對應權限的資料。</p>
-    <input type="email" id="login-email" placeholder="your@gmail.com">
+    <h3><i class="fa-solid fa-user-circle" style="color:var(--accent)"></i> 使用 Google 帳號登入</h3>
+    <p>以 Google 帳號登入後，系統會依會員名單顯示對應權限的資料。</p>
+    <div id="g-signin" style="display:flex; justify-content:center; min-height:44px; margin:0.5rem 0 1rem"></div>
+    <p id="login-unavailable" style="display:none; color:var(--text-muted)">登入功能尚未開放，目前為訪客模式。</p>
     <div class="modal-btn-row">
-      <button class="btn-confirm" onclick="submitEmail()">確認登入</button>
+      <button class="btn-guest" id="btn-logout" onclick="logout()" style="display:none">登出</button>
       <button class="btn-guest" onclick="closeLoginModal()">訪客模式</button>
     </div>
   </div>
@@ -242,7 +243,7 @@
 
 <script>
   // ── 版本號 ─────────────────────────────────────────────────────────────────
-  var APP_VERSION = '1.1.5';
+  var APP_VERSION = '1.1.6';
   // ── 請填入您部署的 GAS Web App URL ──────────────────────────────────────────
   var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbz8lDXJsyjAvuhDTW_heIkNI6vGnFUAk9gB-4sVkcD499ObQDslO1mMoe8CljI_CXJv/exec';
   // ────────────────────────────────────────────────────────────────────────────
@@ -254,7 +255,21 @@
   var _currentList = [];
   var userRole = 'visitor';
   var isRestricted = true;
-  var userEmail = localStorage.getItem('auction_email') || '';
+  // Google 登入：後端只認驗證過的 ID token（不再相信自填 Email）。Client ID 為公開值，需與 常數.gs 相同
+  var GOOGLE_CLIENT_ID = '743693957557-61r5v4tno7fej7lvgdbphq5jd7ghbgon.apps.googleusercontent.com';
+  var ID_TOKEN_KEY = 'auction_id_token';
+  var LOGGED_IN_FLAG = 'auction_logged_in';
+  function _ssGet(k){ try { return sessionStorage.getItem(k) || ''; } catch(e){ return ''; } }
+  function _ssSet(k,v){ try { if (v) sessionStorage.setItem(k, v); else sessionStorage.removeItem(k); } catch(e){} }
+  function _lsGet(k){ try { return localStorage.getItem(k) || ''; } catch(e){ return ''; } }
+  function _lsSet(k,v){ try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch(e){} }
+  function tokenExp(t){
+    try { return JSON.parse(atob(String(t).split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).exp || 0; }
+    catch(e){ return 0; }
+  }
+  _lsSet('auction_email', ''); // 清掉舊版自填 Email
+  var idToken = _ssGet(ID_TOKEN_KEY);
+  if (idToken && tokenExp(idToken) * 1000 < Date.now() + 60000) { idToken = ''; _ssSet(ID_TOKEN_KEY, ''); }
   var _totalGeneral = 0;
   var _totalSpecial = 0;
   // 分頁籤按需載入：首屏只抓 general，special 等切換時再抓（後端 ?tab= 參數）
@@ -273,7 +288,48 @@
     }
     renderSkeleton();
     loadData('general'); // 首屏只抓 general，special 切頁時再抓
+    initGoogleLogin();
   };
+
+  var _gisReady = false;
+  function initGoogleLogin() {
+    if (_gisReady || !GOOGLE_CLIENT_ID || !(window.google && google.accounts && google.accounts.id)) return;
+    _gisReady = true;
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: onGoogleCredential,
+      auto_select: true,
+      cancel_on_tap_outside: true
+    });
+    google.accounts.id.renderButton(document.getElementById('g-signin'),
+      { theme: 'filled_blue', size: 'large', shape: 'pill', text: 'signin_with', locale: 'zh-TW' });
+    // 曾登入過、但這個分頁還沒有 token → 嘗試自動登入
+    if (!idToken && _lsGet(LOGGED_IN_FLAG)) google.accounts.id.prompt();
+  }
+  window.onGoogleLibraryLoad = initGoogleLogin;
+
+  function onGoogleCredential(resp) {
+    idToken = (resp && resp.credential) || '';
+    _ssSet(ID_TOKEN_KEY, idToken);
+    _lsSet(LOGGED_IN_FLAG, idToken ? '1' : '');
+    closeLoginModal();
+    reloadAll();
+  }
+
+  function logout() {
+    idToken = '';
+    _ssSet(ID_TOKEN_KEY, '');
+    _lsSet(LOGGED_IN_FLAG, '');
+    if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect();
+    closeLoginModal();
+    reloadAll();
+  }
+
+  function reloadAll() {
+    renderSkeleton();
+    _loadedTabs = { general: false, special: false }; // 換帳號權限不同，全部重抓
+    loadData(currentTab);
+  }
 
   function showSetupNotice() {
     document.getElementById('list').innerHTML = '';
@@ -299,7 +355,7 @@
 
   function buildApiUrl(tab) {
     var url = WEB_APP_URL + '?tab=' + tab;
-    if (userEmail) url += '&email=' + encodeURIComponent(userEmail);
+    if (idToken) url += '&id_token=' + encodeURIComponent(idToken);
     return url;
   }
 
@@ -333,6 +389,16 @@
       return;
     }
 
+    if (data.authError && idToken) {
+      // token 無效或過期：降為訪客並請使用者重新登入
+      idToken = '';
+      _ssSet(ID_TOKEN_KEY, '');
+      var __t = document.getElementById('toast');
+      __t.innerHTML = '<i class="fa-solid fa-circle-info"></i> 登入已過期，請重新登入';
+      __t.style.opacity = 1;
+      setTimeout(function() { __t.style.opacity = 0; }, 4000);
+      if (_gisReady) google.accounts.id.prompt();
+    }
     userRole = data.userRole || 'visitor';
     isRestricted = userRole !== 'pro';
     _totalGeneral = Number(data.totalGeneral) || _totalGeneral || (data.general||[]).length;
@@ -477,7 +543,7 @@
     var _limit = getRoleLimit(userRole);
     if (isRestricted && page.length > 0 && _curTotal >= _limit) {
       var title = '發現更多高回報物件';
-      var desc = '目前的 [訪客] 模式僅能預覽 3 筆案件。請輸入您的 Email 帳號以查看更多資料。';
+      var desc = '目前的 [訪客] 模式僅能預覽 3 筆案件。請使用 Google 帳號登入以查看更多資料。';
       if (userRole === 'free') {
         title = '取得全台完整投資數據';
         desc = '您目前已登入 [普通會員]，可預覽 10 筆案件。升級專業版即可解鎖全台完整案件與精確計算。';
@@ -529,7 +595,8 @@
   }
 
   function openLoginModal() {
-    document.getElementById('login-email').value = userEmail;
+    document.getElementById('btn-logout').style.display = idToken ? '' : 'none';
+    document.getElementById('login-unavailable').style.display = GOOGLE_CLIENT_ID ? 'none' : '';
     document.getElementById('login-modal').style.display = 'flex';
   }
 
@@ -540,27 +607,10 @@
     if (e.target === this) closeLoginModal();
   });
 
-  function submitEmail() {
-    var input = document.getElementById('login-email').value.trim();
-    if (input && input.includes('@')) {
-      userEmail = input;
-      localStorage.setItem('auction_email', userEmail);
-    } else {
-      userEmail = '';
-      localStorage.removeItem('auction_email');
-    }
-    closeLoginModal();
-    renderSkeleton();
-    _loadedTabs = { general: false, special: false }; // 換帳號權限不同，全部重抓
-    loadData(currentTab);
-  }
-
-  document.getElementById('login-email').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') submitEmail();
-  });
 
   var renderTimer;
   function debounceRender() { clearTimeout(renderTimer); renderTimer = setTimeout(render, 300); }
 </script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </body>
 </html>

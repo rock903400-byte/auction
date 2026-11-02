@@ -118,4 +118,49 @@ if strict:
     else:
         print("[OK] .claspignore 存在")
 
+# 10. 密鑰外洩檢查（strict）：repo 是公開的，.env 與寫死的 token 都不能進 git
+if strict:
+    import subprocess
+
+    try:
+        tracked = subprocess.run(
+            ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+    except (OSError, subprocess.CalledProcessError) as e:
+        tracked = []
+        print(f"[WARN] 無法執行 git ls-files：{e}")
+
+    env_tracked = [f for f in tracked if re.search(r"(^|/)\.env(\.|$)", f)]
+    if env_tracked:
+        print(f"[FAIL] .env 被 git 追蹤：{env_tracked}")
+        ok = False
+    else:
+        print("[OK] .env 未被 git 追蹤")
+
+    secret_patterns = [
+        # ADMIN_TOKEN / RELAY_SECRET / *_SECRET 被賦值成 20 字以上的字串字面值
+        re.compile(
+            r"(ADMIN_TOKEN|RELAY_SECRET|RELAY_PROXY_SECRET|[A-Z_]*SECRET)\b"
+            r"[^\n]{0,40}?[=:,]\s*[\"'][A-Za-z0-9_\-+/]{20,}[\"']"
+        ),
+        re.compile(r"\b[0-9a-f]{48,}\b"),  # 長十六進位（token_hex 產生的密鑰）
+    ]
+    text_ext = (".py", ".gs", ".js", ".html", ".json", ".yml", ".yaml", ".md", ".txt")
+    leaks = []
+    for f in tracked:
+        if not f.endswith(text_ext):
+            continue
+        try:
+            content = (root / f).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for i, line in enumerate(content.splitlines(), 1):
+            if any(p.search(line) for p in secret_patterns):
+                leaks.append(f"{f}:{i}")
+    if leaks:
+        print(f"[FAIL] 疑似寫死的密鑰：{leaks[:10]}")
+        ok = False
+    else:
+        print("[OK] 未發現寫死的密鑰")
+
 sys.exit(0 if ok else 1)

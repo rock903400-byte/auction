@@ -105,10 +105,14 @@ function doGet(e) {
   }
   if (params.action === 'relayStatus') {
     var ageH = relayIngestAgeHours_();
+    var _sp = PropertiesService.getScriptProperties();
     return ContentService.createTextOutput(JSON.stringify({
       ok: true, version: CONST_VERSION, lastIngest: relayIngestLabel_(),
       ageHours: ageH === null ? null : Math.round(ageH * 10) / 10,
-      fresh: ageH !== null && ageH < RELAY_FRESH_HOURS
+      fresh: ageH !== null && ageH < RELAY_FRESH_HOURS,
+      proxyConfigured: isTaiwanRelayConfigured_(),
+      idAud: _sp.getProperty('RELAY_ID_AUD') || '',   // GAS 身分 token audience（公開值）
+      loginConfigured: !!GOOGLE_CLIENT_ID
     })).setMimeType(ContentService.MimeType.JSON);
   }
   if (params.action === 'clearCache') {
@@ -116,7 +120,9 @@ function doGet(e) {
     catch (err) { return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message })).setMimeType(ContentService.MimeType.JSON); }
   }
 
-  const email = params.email ? params.email.trim() : '';
+  // 身分只認 Google 登入的 ID token；?email= 一律忽略（舊版可冒用他人信箱取得 pro 權限）
+  const auth = params.id_token ? verifyIdToken_(params.id_token) : null;
+  const email = (auth && auth.email) ? auth.email : '';
   const role = email ? checkUserRole(email) : 'visitor';
 
   // tab=all（預設，相容舊前端）| general | special：只回傳該分頁陣列，total 兩個都給（前端 badge 用）
@@ -144,14 +150,78 @@ function doGet(e) {
       updatedAt:   allData.updatedAt,
       userEmail:   email,
       userRole:    role,
+      authError:   (auth && auth.error) ? auth.error : '',
     }))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// ─── Relay 資料入口（POST JSON）───────────────────────────────────────────
-// 司法院阻擋 GAS 出口 IP，改由 relay_scrape.py（GitHub Actions / 本機）抓原始資料後送入：
-// body = { action:"ingest", token:ADMIN_TOKEN, general:[...原始 data], buy:[...原始 data] }
-// 篩選、寫表、預熱快取全部沿用 writeGeneralList_ / writeBuyList_，與 GAS 自抓邏輯一致。
+// ─── Google 登入 ID token 驗證 ───────────────────────────────────────────────
+// 透過 Google tokeninfo 驗簽（GAS 連得到 Google 自家 API），再檢查 aud / iss / email_verified / exp。
+// 結果以 token 的 SHA-256 為 key 快取，存活時間不超過 token 到期時間。
+function verifyIdToken_(idToken) {
+  if (!GOOGLE_CLIENT_ID) return { error: 'login_not_configured' };
+  idToken = String(idToken || '');
+  if (!idToken || idToken.length > 4096) return { error: 'invalid' };
+  var now = Math.floor(Date.now() / 1000);
+  var cache = null, key = '';
+  try {
+    cache = CacheService.getScriptCache();
+    key = 'idt_' + Utilities.base64EncodeWebSafe(
+      Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, idToken)).replace(/=+$/, '');
+    var hit = cache.get(key);
+    if (hit) {
+      var c = JSON.parse(hit);
+      if (!c.email || c.exp > now) return c;
+    }
+  } catch (_e) { cache = null; }
+
+  var out;
+  try {
+    var res = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken),
+      { muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) {
+      out = { error: 'invalid' };   // 簽章錯誤或已過期
+    } else {
+      var p = JSON.parse(res.getContentText());
+      var exp = Number(p.exp) || 0;
+      if (p.aud !== GOOGLE_CLIENT_ID) out = { error: 'invalid' };
+      else if (p.iss !== 'accounts.google.com' && p.iss !== 'https://accounts.google.com') out = { error: 'invalid' };
+      else if (String(p.email_verified) !== 'true' || !p.email) out = { error: 'unverified' };
+      else if (exp <= now) out = { error: 'expired' };
+      else out = { email: String(p.email).trim().toLowerCase(), exp: exp };
+    }
+  } catch (err) {
+    return { error: 'verify_failed' };   // tokeninfo 暫時連不上：不快取，下次重試
+  }
+  try {
+    var ttl = out.email ? Math.min(3600, out.exp - now) : 300;
+    if (cache && ttl > 0) cache.put(key, JSON.stringify(out), ttl);
+  } catch (_e) {}
+  return out;
+}
+
+// ─── 寫入原始資料（台灣代理與 doPost ingest 共用）─────────────────────────────
+// 篩選、寫表、預熱快取沿用 writeGeneralList_ / writeBuyList_；空陣列不寫，保留既有資料。
+// 兩表皆寫入成功才記 LAST_INGEST_AT。呼叫端負責 LockService。
+function ingestRaw_(general, buy) {
+  general = Array.isArray(general) ? general : [];
+  buy = Array.isArray(buy) ? buy : [];
+  var g = general.length ? writeGeneralList_(general) : 0;
+  var b = buy.length ? writeBuyList_(buy) : 0;
+  var ok = g > 0 && b > 0;
+  if (ok) {
+    PropertiesService.getScriptProperties().setProperty('LAST_INGEST_AT', String(Date.now()));
+    if (typeof warmCache === 'function') {
+      try { warmCache(); } catch (_e) { Logger.log("快取預熱略過: " + _e.message); }
+    }
+  }
+  return { ok: ok, raw: { general: general.length, buy: buy.length }, written: { general: g, buy: b } };
+}
+
+// ─── 管理用 POST 入口（皆需 ADMIN_TOKEN）─────────────────────────────────────
+// ingest        { general, buy }   手動備援 relay_scrape.py 送入原始資料
+// report        { error }          relay_scrape.py 失敗回報 → 寄信
+// setRelayProxy { url, secret }    設定台灣機房代抓函式（密鑰只存 ScriptProperties）
 function doPost(e) {
   function out(obj) {
     return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
@@ -173,28 +243,23 @@ function doPost(e) {
     });
     return out({ ok: true, reported: true });
   }
+  if (body.action === 'setRelayProxy') {
+    var pUrl = String(body.url || '');
+    var pSecret = String(body.secret || '');
+    if (!/^https:\/\/[a-z0-9.-]+\.(cloudfunctions\.net|run\.app)\//.test(pUrl) || pSecret.length < 32) {
+      return out({ ok: false, error: 'bad url or secret' });
+    }
+    PropertiesService.getScriptProperties().setProperties({ RELAY_PROXY_URL: pUrl, RELAY_PROXY_SECRET: pSecret });
+    return out({ ok: true, proxyConfigured: true });
+  }
   if (body.action !== 'ingest') return out({ ok: false, error: 'unknown action' });
 
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) return out({ ok: false, error: 'busy: 另有更新任務執行中' });
   try {
-    var general = Array.isArray(body.general) ? body.general : [];
-    var buy = Array.isArray(body.buy) ? body.buy : [];
-    // 空陣列不寫表，保留既有資料
-    var g = general.length ? writeGeneralList_(general) : 0;
-    var b = buy.length ? writeBuyList_(buy) : 0;
-    var ok = g > 0 && b > 0;
-    if (ok) {
-      PropertiesService.getScriptProperties().setProperty('LAST_INGEST_AT', String(Date.now()));
-      if (typeof warmCache === 'function') {
-        try { warmCache(); } catch (_e) { Logger.log("快取預熱略過: " + _e.message); }
-      }
-    }
-    return out({
-      ok: ok, version: CONST_VERSION,
-      raw: { general: general.length, buy: buy.length },
-      written: { general: g, buy: b }
-    });
+    var r = ingestRaw_(body.general, body.buy);
+    r.version = CONST_VERSION;
+    return out(r);
   } catch (err) {
     try { notifyError("relay ingest 失敗", err, { step: "ingest" }); } catch (_e) {}
     return out({ ok: false, error: err.message });
