@@ -4,6 +4,7 @@ name: 法拍資料中繼抓取
 # 改由 GitHub Actions 抓取原始資料後 POST 給 GAS doPost(action=ingest)。
 # 需在 repo Settings → Secrets and variables → Actions 設定 ADMIN_TOKEN
 # （與 GAS 專案屬性 ADMIN_TOKEN 相同）。GAS_URL 選填，預設讀 index.html 的 WEB_APP_URL。
+# 排程只認預設分支：本檔需同時存在於 master（預設分支）與 main。
 
 on:
   schedule:
@@ -27,7 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # 預設分支 master 只放轉址頁；程式碼在 main
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
