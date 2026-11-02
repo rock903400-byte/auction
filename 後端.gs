@@ -165,6 +165,14 @@ function doPost(e) {
   var adminToken = '';
   try { adminToken = PropertiesService.getScriptProperties().getProperty('ADMIN_TOKEN') || ''; } catch (_e) { adminToken = ''; }
   if (!adminToken || body.token !== adminToken) return out({ error: 'forbidden' });
+  // relay 抓取失敗回報 → 立即告警（不必等看門狗）
+  if (body.action === 'report') {
+    notifyError("relay 抓取失敗", new Error(String(body.error || 'unknown').slice(0, 1000)), {
+      step: "relay", relayLastIngest: relayIngestLabel_(),
+      hint: "本機 relay_scrape.py 執行失敗，請看專案資料夾 relay.log"
+    });
+    return out({ ok: true, reported: true });
+  }
   if (body.action !== 'ingest') return out({ ok: false, error: 'unknown action' });
 
   var lock = LockService.getScriptLock();

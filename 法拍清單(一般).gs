@@ -93,7 +93,7 @@ function refreshSession() {
     notifyError("Session 更新失敗", e, {
       step: "refreshSession",
       relayLastIngest: relayIngestLabel_(),
-      hint: "司法院阻擋 GAS IP；請確認 GitHub Actions「法拍資料中繼抓取」是否正常執行"
+      hint: "司法院阻擋 GAS IP；本機 relay 已超過 " + RELAY_FRESH_HOURS + " 小時未送資料，請確認電腦有開機、工作排程器「法拍資料中繼抓取」與 relay.log"
     });
     return false;
   }

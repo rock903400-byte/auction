@@ -28,8 +28,9 @@ function fetchWithRetry(url, options, maxAttempts) {
 }
 
 // ─── Relay（外部抓取）狀態 ──────────────────────────────────────
-// 司法院阻擋 GAS 出口 IP，資料改由 relay_scrape.py 送入 doPost(action=ingest)
-var RELAY_FRESH_HOURS = 20;
+// 司法院阻擋 GAS 出口 IP（GitHub Actions 也被擋），資料改由本機 relay_scrape.py 送入 doPost(action=ingest)
+// 74h：本機週末關機（週五 08:30 → 週一 09:45 ≈ 73.3h）不誤報；relay 真的失敗會即時 report
+var RELAY_FRESH_HOURS = 74;
 
 function relayIngestAgeHours_() {
   try {

@@ -10,21 +10,23 @@ GAS Web App（GAS 爬蟲 + Google Sheets + 純 HTML 前端）。無 npm/bundler�
 | `法拍清單(應買).gs` | 爬蟲：saletype=4，**無日期過濾**，僅 share=全部 + 去重 |
 | `後端.gs` | Web App API 入口（doGet），讀 Sheet 回傳 JSON + 分塊快取 |
 | `常數.gs` | CONST_KEYWORDS（47 偏鄉）、CONST_VERSION、fetchWithRetry（指數退避重試）、notifyError、relay 狀態（LAST_INGEST_AT） |
-| `relay_scrape.py` | **實際抓取來源**：GitHub Actions（`.github/workflows/relay.yml`，每日 07:50）抓司法院原始資料 → POST `doPost(action=ingest)` |
+| `relay_scrape.py` | **實際抓取來源**：本機 Windows 工作排程器（`install_relay_task.ps1`，每日 08:30，錯過補跑）抓司法院原始資料 → POST `doPost(action=ingest)`；Token 放 `.env` |
 | `index.html` | 前端（GitHub Pages 部署） |
 | `live_site.html` | 前端模板（WIP，WEB_APP_URL 留空） |
 | `*.py` | Legacy 驗證工具，非必要勿改 |
 
 ## 資料流（2026-10-29 起）
 
-司法院阻擋 GAS 出口 IP（`UrlFetchApp` 一律 `Address unavailable`，台灣 IP 與其他海外 IP 正常，DNS/TLS 無異狀）。**重試修不好，不要再往 fetchWithRetry 方向修。**
+司法院阻擋雲端機房 IP：GAS（`UrlFetchApp` 一律 `Address unavailable`）與 GitHub Actions（timeout）都連不上，台灣家用/辦公 IP 正常，DNS/TLS 無異狀。**重試修不好，不要再往 fetchWithRetry 方向修。**
 
-`relay_scrape.py`（GitHub Actions / 本機）→ 取 Cookie/CSRF/Token + QUERY.htm saletype=1、4 原始 data → `doPost` body `{action:"ingest", token:ADMIN_TOKEN, general, buy}` → `writeGeneralList_` / `writeBuyList_`（與 GAS 自抓共用篩選寫表）→ 設 `LAST_INGEST_AT`。
+`relay_scrape.py`（本機排程）→ 取 Cookie/CSRF/Token + QUERY.htm saletype=1、4 原始 data → `doPost` body `{action:"ingest", token:ADMIN_TOKEN, general, buy}` → `writeGeneralList_` / `writeBuyList_`（與 GAS 自抓共用篩選寫表）→ 設 `LAST_INGEST_AT`。
 
-- `runAllUpdate`（GAS 觸發器 09:45）：relay 20 小時內成功過就跳過；否則自抓，失敗即告警（看門狗）。`?action=runAllUpdate&force=1` 強制自抓
+- `runAllUpdate`（GAS 觸發器 09:45）：relay 74 小時內成功過就跳過（容許週末關機）；否則自抓，失敗即告警（看門狗）。`?action=runAllUpdate&force=1` 強制自抓
 - `?action=relayStatus&token=xxx` 查最後 ingest 時間
-- GitHub secret `ADMIN_TOKEN` 必填；`GAS_URL` 選填（預設讀 index.html）
-- 本機測試：`python relay_scrape.py --dry-run`；GitHub Actions IP 若也被擋，改用 Windows 工作排程器在本機跑同一支腳本
+- relay 失敗會 POST `{action:"report"}` → GAS 立即寄「relay 抓取失敗」；log 在 `relay.log`
+- 本機測試：`python relay_scrape.py --dry-run`；安裝排程：`powershell -ExecutionPolicy Bypass -File install_relay_task.ps1`
+- `.github/workflows/relay.yml` 只留手動觸發（Azure IP 被擋）；GitHub 預設分支是 `master`（只放轉址頁），workflow 須同時放 master
+- 對外前端在另一個 repo `foreclosure-compensation-analyzer`，仍指向舊部署 @16（1.0.0），同一份試算表
 
 ## 使用者權限
 
