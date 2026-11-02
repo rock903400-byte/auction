@@ -90,7 +90,11 @@ function refreshSession() {
 
   } catch (e) {
     Logger.log("❌ 獲取憑證時發生錯誤: " + e.message);
-    notifyError("Session 更新失敗", e, {step: "refreshSession"});
+    notifyError("Session 更新失敗", e, {
+      step: "refreshSession",
+      relayLastIngest: relayIngestLabel_(),
+      hint: "司法院阻擋 GAS IP；請確認 GitHub Actions「法拍資料中繼抓取」是否正常執行"
+    });
     return false;
   }
 }
@@ -110,25 +114,6 @@ function scrapeLandStableBatch_General() {
   const csrfVal = configSheet.getRange("B2").getValue().toString().trim();
   const tokenVal = configSheet.getRange("B3").getValue().toString().trim();
 
-  const targetSheetName = "法拍清單(一般)";
-  let sheet = ss.getSheetByName(targetSheetName);
-  if (!sheet) { sheet = ss.insertSheet(targetSheetName); }
-
-  const headers = [
-    "筆次", "法院名稱", "案號", "股別", "拍賣日期", "拍次",
-    "縣市", "土地坐落", "面積", "總拍賣底價(元)",
-    "點交", "空地", "標別", "看圖", "備註",
-    "採通訊投標", "土地有無遭受污染", "地圖",
-    "", "土地單價(元/㎡)",
-    "預估補償金", "ROI (%)", "PDF 連結", "是否點交", "是否空地"
-  ];
-
-  function getSafeNum(val) {
-    if (val == null || val === '') return 0;
-    const n = parseFloat(String(val).replace(/,/g, ''));
-    return (!isFinite(n) || isNaN(n)) ? 0 : Math.floor(n);
-  }
-
   try {
     const url = "https://aomp109.judicial.gov.tw/judbp/wkw/WHD1A02/QUERY.htm";
     // 🔴 修正：根據使用者資料，精確設定 40 個鄉鎮市關鍵字
@@ -138,13 +123,6 @@ function scrapeLandStableBatch_General() {
     let currentPage = 1;
     let totalRecords = 0;
     const pageSize = 100;
-
-    // 取得今日民國日期 (格式: 01150503)
-    const now = new Date();
-    const rocYear = now.getFullYear() - 1911;
-    const rocMonth = (now.getMonth() + 1).toString().padStart(2, '0');
-    const rocDay = now.getDate().toString().padStart(2, '0');
-    const todayROC = "0" + rocYear + rocMonth + rocDay;
 
     const __loopStart = Date.now();
     // 🔴 循環抓取分頁（含超時保護，避免 6 分鐘硬砍）
@@ -195,8 +173,48 @@ function scrapeLandStableBatch_General() {
       }
 
       currentPage++;
-      Utilities.sleep(500); 
+      Utilities.sleep(500);
     } while (allFetchedData.length < totalRecords);
+
+    writeGeneralList_(allFetchedData);
+  } catch (e) {
+    Logger.log("❌ 執行一般清單錯誤: " + e.message);
+    notifyError("一般清單抓取失敗", e, {step: "scrapeGeneral"});
+  }
+}
+
+/**
+ * 一般清單：篩選 + 寫表 + 預熱快取（GAS 自抓與 relay ingest 共用）
+ * @param {Object[]} allFetchedData QUERY.htm 回傳的原始 data（未篩選）
+ * @return {number} 寫入筆數（0 表示未寫入、保留既有資料）
+ */
+function writeGeneralList_(allFetchedData) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const targetSheetName = "法拍清單(一般)";
+  let sheet = ss.getSheetByName(targetSheetName);
+  if (!sheet) { sheet = ss.insertSheet(targetSheetName); }
+
+  const headers = [
+    "筆次", "法院名稱", "案號", "股別", "拍賣日期", "拍次",
+    "縣市", "土地坐落", "面積", "總拍賣底價(元)",
+    "點交", "空地", "標別", "看圖", "備註",
+    "採通訊投標", "土地有無遭受污染", "地圖",
+    "", "土地單價(元/㎡)",
+    "預估補償金", "ROI (%)", "PDF 連結", "是否點交", "是否空地"
+  ];
+
+  function getSafeNum(val) {
+    if (val == null || val === '') return 0;
+    const n = parseFloat(String(val).replace(/,/g, ''));
+    return (!isFinite(n) || isNaN(n)) ? 0 : Math.floor(n);
+  }
+
+  // 取得今日民國日期 (格式: 01150503)
+  const now = new Date();
+  const rocYear = now.getFullYear() - 1911;
+  const rocMonth = (now.getMonth() + 1).toString().padStart(2, '0');
+  const rocDay = now.getDate().toString().padStart(2, '0');
+  const todayROC = "0" + rocYear + rocMonth + rocDay;
 
     if (allFetchedData.length > 0) {
       const uniqueData = new Map();
@@ -283,16 +301,14 @@ function scrapeLandStableBatch_General() {
         if (typeof warmCacheTab === 'function') {
           try { warmCacheTab('general'); } catch (_e) { Logger.log("快取預熱略過: " + _e.message); }
         }
+        return allRows.length;
       } else {
         notifyError("一般篩選後為0筆", new Error("filteredData empty"), {step: "scrapeGeneral", raw: allFetchedData.length, filtered: filteredData.length});
       }
     } else {
       notifyError("一般API回傳0筆", new Error("allFetchedData empty"), {step: "scrapeGeneral"});
     }
-  } catch (e) {
-    Logger.log("❌ 執行一般清單錯誤: " + e.message);
-    notifyError("一般清單抓取失敗", e, {step: "scrapeGeneral"});
-  }
+    return 0;
 }
 
 /**
@@ -330,13 +346,24 @@ function initMembershipSheet() {
 /**
  * 一鍵更新入口（含 5 分鐘超時保護 + LockService，避免併發清空試算表）
  */
-function runAllUpdate() {
+function runAllUpdate(force) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) {
     Logger.log("⚠️ runAllUpdate 取得鎖失敗，另有任務執行中，跳過");
     return;
   }
   try {
+    // Relay 模式：司法院自 2026-10-29 起阻擋 GAS 出口 IP（Address unavailable），
+    // 改由外部 relay_scrape.py 抓取後 doPost(action=ingest) 送入。
+    // relay 近期已成功 → GAS 不再自抓；relay 停擺 → GAS 自抓，失敗即告警（看門狗）。
+    // 注意：時間觸發器會傳入 event 物件，故只認 force === true。
+    if (force !== true) {
+      const ageH = relayIngestAgeHours_();
+      if (ageH !== null && ageH < RELAY_FRESH_HOURS) {
+        Logger.log("⏭️ relay 已於 " + ageH.toFixed(1) + " 小時前更新資料，GAS 跳過自抓");
+        return;
+      }
+    }
     const startTime = Date.now();
     function checkTimeout(step) {
       if (Date.now() - startTime > 5 * 60 * 1000) {

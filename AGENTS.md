@@ -9,10 +9,22 @@ GAS Web App（GAS 爬蟲 + Google Sheets + 純 HTML 前端）。無 npm/bundler�
 | `法拍清單(一般).gs` | 爬蟲：saletype=1，保留全部拍次 + 日期過濾 |
 | `法拍清單(應買).gs` | 爬蟲：saletype=4，**無日期過濾**，僅 share=全部 + 去重 |
 | `後端.gs` | Web App API 入口（doGet），讀 Sheet 回傳 JSON + 分塊快取 |
-| `常數.gs` | CONST_KEYWORDS（47 偏鄉）、CONST_VERSION、fetchWithRetry（指數退避重試）、notifyError |
+| `常數.gs` | CONST_KEYWORDS（47 偏鄉）、CONST_VERSION、fetchWithRetry（指數退避重試）、notifyError、relay 狀態（LAST_INGEST_AT） |
+| `relay_scrape.py` | **實際抓取來源**：GitHub Actions（`.github/workflows/relay.yml`，每日 07:50）抓司法院原始資料 → POST `doPost(action=ingest)` |
 | `index.html` | 前端（GitHub Pages 部署） |
 | `live_site.html` | 前端模板（WIP，WEB_APP_URL 留空） |
 | `*.py` | Legacy 驗證工具，非必要勿改 |
+
+## 資料流（2026-10-29 起）
+
+司法院阻擋 GAS 出口 IP（`UrlFetchApp` 一律 `Address unavailable`，台灣 IP 與其他海外 IP 正常，DNS/TLS 無異狀）。**重試修不好，不要再往 fetchWithRetry 方向修。**
+
+`relay_scrape.py`（GitHub Actions / 本機）→ 取 Cookie/CSRF/Token + QUERY.htm saletype=1、4 原始 data → `doPost` body `{action:"ingest", token:ADMIN_TOKEN, general, buy}` → `writeGeneralList_` / `writeBuyList_`（與 GAS 自抓共用篩選寫表）→ 設 `LAST_INGEST_AT`。
+
+- `runAllUpdate`（GAS 觸發器 09:45）：relay 20 小時內成功過就跳過；否則自抓，失敗即告警（看門狗）。`?action=runAllUpdate&force=1` 強制自抓
+- `?action=relayStatus&token=xxx` 查最後 ingest 時間
+- GitHub secret `ADMIN_TOKEN` 必填；`GAS_URL` 選填（預設讀 index.html）
+- 本機測試：`python relay_scrape.py --dry-run`；GitHub Actions IP 若也被擋，改用 Windows 工作排程器在本機跑同一支腳本
 
 ## 使用者權限
 
@@ -57,10 +69,8 @@ Remote actions（不需 clasp 即可觸發爬蟲，需 ADMIN_TOKEN）：
 
 ```bash
 npx clasp push -f            # 上傳所有檔案到 GAS（非互動環境需加 -f）
-npx clasp undeploy <舊版ID>  # 先移除舊版
-npx clasp deploy -d "說明"   # 產生新版 URL（如 @28）
-# 更新 index.html:247 的 WEB_APP_URL → 新版 URL
-npx clasp push -f            # 同步 index.html
+# 原地更新正式部署（URL 不變，不必改 index.html:247）
+npx clasp deploy -i AKfycbz8lDXJsyjAvuhDTW_heIkNI6vGnFUAk9gB-4sVkcD499ObQDslO1mMoe8CljI_CXJv -d "說明"
 git add -A && git commit -m "" && git push
 ```
 
@@ -78,6 +88,7 @@ python test_100_users.py     # mock 測試（不需外部服務）
 ## 已知陷阱
 
 - `runAllUpdate` 含 5 分鐘超時 + `LockService`，分頁迴圈另有 4.5 分鐘保護，避免 GAS 6 分鐘限制中途寫入不完整數據
+- 司法院自 2026-10-29 起**持續**阻擋 GAS IP（見「資料流」）；GAS 內所有對司法院的請求（含 debug）都會失敗
 - 司法院網站 (`aomp109.judicial.gov.tw`) 偶發瞬時 `Address unavailable` 或 5xx：所有對外請求須透過 `常數.gs` 的 `fetchWithRetry(url, options, 3)`（指數退避 2s/4s）呼叫；`refreshSession` 失敗時由其單一處呼叫 `notifyError`，`runAllUpdate` 不重複告警且保留既有試算表與快取資料
 - 應買**沒有**日期過濾（與一般不同），舊版曾錯誤加入導致筆數從 121 掉到 6
 - WEB_APP_URL 必須指向**最新部署版本**，否則前端連不上 API

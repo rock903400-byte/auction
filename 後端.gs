@@ -93,7 +93,7 @@ function doGet(e) {
     catch (err) { return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message })).setMimeType(ContentService.MimeType.JSON); }
   }
   if (params.action === 'runAllUpdate') {
-    try { runAllUpdate(); return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON); }
+    try { runAllUpdate(params.force === '1'); return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON); }
     catch (err) { return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message })).setMimeType(ContentService.MimeType.JSON); }
   }
   if (params.action === 'warmCache') {
@@ -102,6 +102,14 @@ function doGet(e) {
       return ContentService.createTextOutput(JSON.stringify({ ok: true, general: warmed.general.length, special: warmed.special.length })).setMimeType(ContentService.MimeType.JSON);
     }
     catch (err) { return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message })).setMimeType(ContentService.MimeType.JSON); }
+  }
+  if (params.action === 'relayStatus') {
+    var ageH = relayIngestAgeHours_();
+    return ContentService.createTextOutput(JSON.stringify({
+      ok: true, version: CONST_VERSION, lastIngest: relayIngestLabel_(),
+      ageHours: ageH === null ? null : Math.round(ageH * 10) / 10,
+      fresh: ageH !== null && ageH < RELAY_FRESH_HOURS
+    })).setMimeType(ContentService.MimeType.JSON);
   }
   if (params.action === 'clearCache') {
     try { clearCache(); return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON); }
@@ -138,6 +146,53 @@ function doGet(e) {
       userRole:    role,
     }))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ─── Relay 資料入口（POST JSON）───────────────────────────────────────────
+// 司法院阻擋 GAS 出口 IP，改由 relay_scrape.py（GitHub Actions / 本機）抓原始資料後送入：
+// body = { action:"ingest", token:ADMIN_TOKEN, general:[...原始 data], buy:[...原始 data] }
+// 篩選、寫表、預熱快取全部沿用 writeGeneralList_ / writeBuyList_，與 GAS 自抓邏輯一致。
+function doPost(e) {
+  function out(obj) {
+    return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+  }
+  var body;
+  try {
+    body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+  } catch (err) {
+    return out({ ok: false, error: 'bad json' });
+  }
+  var adminToken = '';
+  try { adminToken = PropertiesService.getScriptProperties().getProperty('ADMIN_TOKEN') || ''; } catch (_e) { adminToken = ''; }
+  if (!adminToken || body.token !== adminToken) return out({ error: 'forbidden' });
+  if (body.action !== 'ingest') return out({ ok: false, error: 'unknown action' });
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return out({ ok: false, error: 'busy: 另有更新任務執行中' });
+  try {
+    var general = Array.isArray(body.general) ? body.general : [];
+    var buy = Array.isArray(body.buy) ? body.buy : [];
+    // 空陣列不寫表，保留既有資料
+    var g = general.length ? writeGeneralList_(general) : 0;
+    var b = buy.length ? writeBuyList_(buy) : 0;
+    var ok = g > 0 && b > 0;
+    if (ok) {
+      PropertiesService.getScriptProperties().setProperty('LAST_INGEST_AT', String(Date.now()));
+      if (typeof warmCache === 'function') {
+        try { warmCache(); } catch (_e) { Logger.log("快取預熱略過: " + _e.message); }
+      }
+    }
+    return out({
+      ok: ok, version: CONST_VERSION,
+      raw: { general: general.length, buy: buy.length },
+      written: { general: g, buy: b }
+    });
+  } catch (err) {
+    try { notifyError("relay ingest 失敗", err, { step: "ingest" }); } catch (_e) {}
+    return out({ ok: false, error: err.message });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ─── 查詢會員權限（含 30 分鐘快取，避免每次請求都讀表）───────────────────────

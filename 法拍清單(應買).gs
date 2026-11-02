@@ -19,26 +19,6 @@ function scrapeLandStableBatch_Buy() {
     return;
   }
 
-  // 🔴 步驟 2：準備目標資料表 (應買)
-  const targetSheetName = "法拍清單(應買)";
-  let sheet = ss.getSheetByName(targetSheetName);
-  if (!sheet) { sheet = ss.insertSheet(targetSheetName); }
-
-  const headers_excel = [
-    "筆次", "法院名稱", "案號", "股別", "拍賣日期", "特別程序",
-    "縣市", "土地坐落", "面積", "總拍賣底價(元)",
-    "點交", "空地", "標別", "看圖", "備註",
-    "採通訊投標", "土地有無遭受污染", "地圖",
-    "", "土地單價(元/㎡)",
-    "預估補償金", "ROI (%)", "PDF 連結", "是否點交", "是否空地"
-  ];
-
-  function getSafeNum(val) {
-    if (val == null || val === '') return 0;
-    const n = parseFloat(String(val).replace(/,/g, ''));
-    return (!isFinite(n) || isNaN(n)) ? 0 : Math.floor(n);
-  }
-
   try {
     const url = "https://aomp109.judicial.gov.tw/judbp/wkw/WHD1A02/QUERY.htm";
     // 🔴 修正：根據使用者資料，精確設定 40 個鄉鎮市關鍵字
@@ -100,6 +80,40 @@ function scrapeLandStableBatch_Buy() {
       currentPage++;
       Utilities.sleep(500);
     } while (allFetchedData.length < totalRecords);
+
+    writeBuyList_(allFetchedData);
+  } catch (e) {
+    Logger.log("❌ 執行應買發生錯誤: " + e.message);
+    notifyError("應買清單抓取失敗", e, {step: "scrapeBuy"});
+  }
+}
+
+/**
+ * 應買清單：篩選（share=全部 + 去重，無日期過濾）+ 寫表 + 預熱快取
+ * GAS 自抓與 relay ingest 共用
+ * @param {Object[]} allFetchedData QUERY.htm 回傳的原始 data（未篩選）
+ * @return {number} 寫入筆數（0 表示未寫入、保留既有資料）
+ */
+function writeBuyList_(allFetchedData) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const targetSheetName = "法拍清單(應買)";
+  let sheet = ss.getSheetByName(targetSheetName);
+  if (!sheet) { sheet = ss.insertSheet(targetSheetName); }
+
+  const headers_excel = [
+    "筆次", "法院名稱", "案號", "股別", "拍賣日期", "特別程序",
+    "縣市", "土地坐落", "面積", "總拍賣底價(元)",
+    "點交", "空地", "標別", "看圖", "備註",
+    "採通訊投標", "土地有無遭受污染", "地圖",
+    "", "土地單價(元/㎡)",
+    "預估補償金", "ROI (%)", "PDF 連結", "是否點交", "是否空地"
+  ];
+
+  function getSafeNum(val) {
+    if (val == null || val === '') return 0;
+    const n = parseFloat(String(val).replace(/,/g, ''));
+    return (!isFinite(n) || isNaN(n)) ? 0 : Math.floor(n);
+  }
 
     if (allFetchedData.length > 0) {
       const uniqueData = new Map();
@@ -169,16 +183,13 @@ function scrapeLandStableBatch_Buy() {
         if (typeof warmCacheTab === 'function') {
           try { warmCacheTab('special'); } catch (_e) { Logger.log("快取預熱略過: " + _e.message); }
         }
+        return allRows.length;
       } else {
         notifyError("應買篩選後為0筆", new Error("filteredData empty"), {step: "scrapeBuy", raw: allFetchedData.length, filtered: filteredData.length});
       }
-      
+
     } else {
       notifyError("應買API回傳0筆", new Error("allFetchedData empty"), {step: "scrapeBuy"});
     }
-
-  } catch (e) {
-    Logger.log("❌ 執行應買發生錯誤: " + e.message);
-    notifyError("應買清單抓取失敗", e, {step: "scrapeBuy"});
-  }
+    return 0;
 }
